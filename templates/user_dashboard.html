@@ -1,0 +1,117 @@
+
+{% extends "base.html" %}
+{% block title %}Dashboard — Interview Bot{% endblock %}
+{% block content %}
+
+<!-- Header -->
+<div class="row" style="justify-content:space-between;margin-bottom:1.4rem;">
+  <div>
+    <h2 style="font-size:1.05rem;font-weight:600;">Hello, {{ user.name }}</h2>
+    <p class="muted">
+      {{ user.college or '' }}{% if user.college and user.target_company %} · {% endif %}{{ user.target_company or '' }}
+    </p>
+  </div>
+  <a href="{{ url_for('interview_page') }}" class="btn btn-primary">+ New Interview</a>
+</div>
+
+<!-- Stats: total, avg score, last interview date -->
+<div class="stats">
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.total or 0 }}</div>
+    <div class="stat-key">Total Interviews</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.avg_score or '—' }}</div>
+    <div class="stat-key">Avg Score / 10</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.last_interview[:10] if stats.last_interview else '—' }}</div>
+    <div class="stat-key">Last Interview</div>
+  </div>
+</div>
+
+<!-- Profile Card -->
+<div class="card">
+  <span class="lbl">Profile</span>
+  <div class="grid2">
+    <div><span class="muted">Email</span><br>{{ user.email }}</div>
+    <div><span class="muted">Phone</span><br>{{ user.phone or '—' }}</div>
+    <div style="margin-top:.7rem;"><span class="muted">College</span><br>{{ user.college or '—' }}</div>
+    <div style="margin-top:.7rem;"><span class="muted">Target Company</span><br>{{ user.target_company or '—' }}</div>
+  </div>
+</div>
+
+<!-- Interview History — expandable with full per-question AI analysis -->
+<div class="card" style="padding:0;">
+  <div style="padding:1.2rem 1.5rem .6rem;">
+    <span class="lbl" style="margin:0;">Interview History ({{ interviews|length }})</span>
+  </div>
+
+  {% if interviews %}
+    {% for iv in interviews %}
+    <div style="border-top:1px solid var(--border);padding:0 1.5rem;">
+
+      <!-- Click the summary to expand/collapse this interview -->
+      <details>
+        <summary>
+          <span>
+            <strong>{{ iv.job_role }}</strong>
+            <span class="muted" style="font-weight:400;">
+              · {{ iv.test_type | capitalize }} · {{ iv.experience | capitalize }} · {{ iv.created_at[:10] }}
+            </span>
+          </span>
+          <!-- Avg score shown on the right side of summary -->
+          <span style="color:var(--text);font-weight:600;font-size:.9rem;margin-right:1.5rem;">
+            {{ iv.avg_score or '—' }}/10
+          </span>
+        </summary>
+
+        <!-- Expanded: show every Q&A pair with AI analysis -->
+        <div style="padding-bottom:1rem;">
+          {% for h in iv.history %}{% if h.answer %}
+          <div style="margin-top:.8rem;padding:.9rem;background:var(--bg);border-radius:6px;">
+
+            <!-- Question -->
+            <p style="font-size:.82rem;font-weight:500;margin-bottom:.35rem;">Q{{ loop.index }}: {{ h.question }}</p>
+
+            <!-- Your answer -->
+            <p style="font-size:.82rem;color:var(--muted);font-style:italic;margin-bottom:.4rem;">"{{ h.answer }}"</p>
+
+            <!-- AI analysis badges -->
+            {% if h.analysis %}
+            <div class="row">
+              <!-- Sentiment: overall tone of the answer -->
+              <span class="pill pill-{{ 'pos' if h.analysis.sentiment=='positive' else 'neg' if h.analysis.sentiment=='negative' else 'neu' }}">
+                {{ h.analysis.sentiment }}
+              </span>
+
+              <!-- Emotion: how you sounded (confident, nervous, confused…) -->
+              <span class="pill pill-{{ 'pos' if h.analysis.emotion in ['confident','enthusiastic'] else 'neg' if h.analysis.emotion in ['nervous','confused'] else 'neu' }}">
+                😐 {{ h.analysis.emotion }}
+              </span>
+
+              <!-- Score badge -->
+              <span style="font-size:.75rem;color:var(--muted);">Score: <strong>{{ h.analysis.quality_score }}/10</strong></span>
+
+              <!-- Plagiarism warning — only show if medium or high risk -->
+              {% if h.analysis.plagiarism_risk == 'high' %}
+                <span class="pill pill-neg">⚠ plagiarism: high</span>
+              {% elif h.analysis.plagiarism_risk == 'medium' %}
+                <span class="pill pill-neu">⚠ plagiarism: medium</span>
+              {% endif %}
+            </div>
+            {% endif %}
+
+          </div>
+          {% endif %}{% endfor %}
+        </div>
+
+      </details>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted" style="padding:1.2rem 1.5rem;">No interviews yet. Start your first one!</p>
+  {% endif %}
+</div>
+
+{% endblock %}

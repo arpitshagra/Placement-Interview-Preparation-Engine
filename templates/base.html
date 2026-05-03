@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>{% block title %}IntervIQ{% endblock %}</title>
+<style>
+  :root {
+    --bg:     #f7f7f6;
+    --white:  #ffffff;
+    --border: #e4e4e2;
+    --text:   #1c1c1a;
+    --muted:  #8a8a86;
+    --accent: #1c1c1a;
+    --green:  #1a7f37;
+    --red:    #cf222e;
+    --amber:  #9a6700;
+    --r:      9px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  /* Nav */
+  nav {
+    background: var(--white);
+    border-bottom: 1px solid var(--border);
+    padding: 0 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 52px;
+  }
+  .nav-brand { font-size: .9rem; font-weight: 600; }
+  .nav-right { display: flex; align-items: center; gap: 1.2rem; }
+  .nav-right a, .nav-right span {
+    font-size: .8rem; color: var(--muted);
+    transition: color .15s;
+  }
+  .nav-right a:hover { color: var(--text); }
+  .nav-pill {
+    font-size: .65rem; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; padding: .2rem .55rem;
+    border-radius: 99px; background: var(--bg); border: 1px solid var(--border);
+  }
+
+  /* Page wrapper */
+  .page { max-width: 900px; margin: 0 auto; padding: 2.2rem 1.2rem 5rem; }
+
+  /* Card */
+  .card {
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 1.5rem; margin-bottom: .85rem;
+  }
+
+  /* Labels */
+  .lbl {
+    font-size: .68rem; font-weight: 600; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--muted);
+    display: block; margin-bottom: .6rem;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
+    padding: .6rem 1.3rem; border: 1px solid var(--border); border-radius: 6px;
+    font-size: .84rem; font-family: inherit; font-weight: 500;
+    cursor: pointer; background: var(--white); color: var(--text);
+    transition: background .15s; white-space: nowrap; text-decoration: none;
+  }
+  .btn:hover:not(:disabled) { background: var(--bg); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover:not(:disabled) { background: #333; border-color: #333; }
+  .btn-danger  { background: var(--red);   color: #fff; border-color: var(--red); }
+  .btn-danger:hover:not(:disabled) { background: #a81b24; }
+  .btn-sm { padding: .38rem .8rem; font-size: .76rem; }
+  .btn-full { width: 100%; }
+
+  /* Form fields */
+  .field { margin-bottom: .85rem; }
+  .field label { font-size: .78rem; color: var(--muted); display: block; margin-bottom: .28rem; }
+  input[type=text], input[type=email], input[type=password],
+  input[type=tel], select, textarea {
+    width: 100%; padding: .6rem .75rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text);
+    font-size: .86rem; font-family: inherit; outline: none;
+    transition: border-color .15s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: #999; }
+  textarea { resize: vertical; min-height: 100px; }
+
+  /* Grid */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+  @media(max-width:500px){ .grid2 { grid-template-columns: 1fr; } }
+
+  /* Stats row */
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; margin-bottom: .85rem; }
+  @media(max-width:500px){ .stats { grid-template-columns: 1fr 1fr; } }
+  .stat-card {
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 1.1rem 1.2rem;
+  }
+  .stat-val { font-size: 1.6rem; font-weight: 700; line-height: 1; }
+  .stat-key { font-size: .72rem; color: var(--muted); margin-top: .2rem; }
+
+  /* Table */
+  .tbl { width: 100%; border-collapse: collapse; font-size: .84rem; }
+  .tbl th {
+    font-size: .68rem; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted);
+    padding: .5rem .75rem; border-bottom: 1px solid var(--border);
+    text-align: left;
+  }
+  .tbl td { padding: .65rem .75rem; border-bottom: 1px solid var(--border); }
+  .tbl tr:last-child td { border-bottom: none; }
+  .tbl tr:hover td { background: var(--bg); }
+
+  /* Pill */
+  .pill {
+    font-size: .63rem; font-weight: 600; letter-spacing: .05em;
+    text-transform: uppercase; padding: .18rem .55rem;
+    border-radius: 99px; border: 1px solid;
+  }
+  .pill-easy   { color: var(--green); border-color: var(--green); }
+  .pill-medium { color: var(--amber); border-color: var(--amber); }
+  .pill-hard   { color: var(--red);   border-color: var(--red);   }
+  .pill-pos    { color: var(--green); border-color: var(--green); }
+  .pill-neg    { color: var(--red);   border-color: var(--red);   }
+  .pill-neu    { color: var(--amber); border-color: var(--amber); }
+
+  /* Flash messages */
+  .flash {
+    padding: .7rem 1rem; border-radius: 6px; font-size: .83rem;
+    margin-bottom: .85rem; border: 1px solid;
+  }
+  .flash-error   { background: #fff5f5; border-color: #fca5a5; color: var(--red); }
+  .flash-success { background: #f0fff4; border-color: #86efac; color: var(--green); }
+
+  /* Divider */
+  .divider { border: none; border-top: 1px solid var(--border); margin: .8rem 0; }
+
+  /* Accordion */
+  details summary {
+    cursor: pointer; font-size: .84rem; font-weight: 500;
+    padding: .6rem 0; list-style: none; display: flex;
+    justify-content: space-between; align-items: center;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::after { content: "+"; color: var(--muted); font-size: 1rem; }
+  details[open] summary::after { content: "−"; }
+
+  .hidden { display: none !important; }
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+  .mt1 { margin-top: .6rem; }
+  .muted { color: var(--muted); font-size: .82rem; }
+</style>
+{% block extra_head %}{% endblock %}
+</head>
+<body>
+
+{% if session.user_id %}
+<nav>
+  <span class="nav-brand">IntervIQ</span>
+  <div class="nav-right">
+    {% if session.role == 'admin' %}
+      <span class="nav-pill">Admin</span>
+      <a href="{{ url_for('admin_dashboard') }}">Users</a>
+    {% else %}
+      <a href="{{ url_for('user_dashboard') }}">Dashboard</a>
+      <a href="{{ url_for('interview_page') }}">New Interview</a>
+    {% endif %}
+    <span>{{ session.name }}</span>
+    <a href="{{ url_for('logout') }}">Logout</a>
+  </div>
+</nav>
+{% endif %}
+
+<div class="page">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+      <div class="flash flash-{{ cat }}">{{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</div>
+</body>
+</html>

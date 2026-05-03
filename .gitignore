@@ -1,0 +1,5 @@
+API_KEY.env
+.env
+responses/
+__pycache__/
+*.db

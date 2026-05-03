@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Sign Up — Interview Bot{% endblock %}
+{% block content %}
+<div style="max-width:420px;margin:2.5rem auto;">
+  <div style="text-align:center;margin-bottom:1.8rem;">
+    <h1 style="font-size:1.1rem;font-weight:600;">Create Account</h1>
+    <p class="muted" style="margin-top:.2rem;">Set up your interview profile</p>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+      <div class="flash flash-{{ cat }}">{{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <div class="card">
+    <form method="POST">
+      <div class="grid2">
+        <div class="field">
+          <label>Full Name *</label>
+          <input type="text" name="name" placeholder="Rahul Sharma" required/>
+        </div>
+        <div class="field">
+          <label>Email *</label>
+          <input type="email" name="email" placeholder="you@email.com" required/>
+        </div>
+      </div>
+      <div class="field">
+        <label>Password *</label>
+        <input type="password" name="password" placeholder="Min 6 characters" required/>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label>Phone</label>
+          <input type="tel" name="phone" placeholder="+91 98765 43210"/>
+        </div>
+        <div class="field">
+          <label>College / University</label>
+          <input type="text" name="college" placeholder="IIT Delhi"/>
+        </div>
+      </div>
+      <div class="field">
+        <label>Target Company</label>
+        <input type="text" name="target_company" placeholder="Google, Microsoft …"/>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full" style="margin-top:.4rem;">
+        Create Account
+      </button>
+    </form>
+  </div>
+
+  <p class="muted" style="text-align:center;margin-top:.9rem;font-size:.8rem;">
+    Already have an account? <a href="{{ url_for('login') }}" style="color:var(--text);font-weight:500;">Sign in</a>
+  </p>
+</div>
+{% endblock %}

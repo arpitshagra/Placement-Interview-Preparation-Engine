@@ -1,0 +1,9 @@
+flask>=2.3
+flask-cors>=4.0
+openai-whisper>=20231117
+pyttsx3>=2.90
+groq>=0.9
+edge-tts>=6.1
+SpeechRecognition>=3.10
+pyaudio>=0.2.13
+numpy>=1.24

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Login — Interview Bot{% endblock %}
+{% block content %}
+<div style="max-width:380px;margin:3rem auto;">
+  <div style="text-align:center;margin-bottom:1.8rem;">
+    <h1 style="font-size:1.1rem;font-weight:600;">Interview Bot</h1>
+    <p class="muted" style="margin-top:.2rem;">Sign in to your account</p>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+      <div class="flash flash-{{ cat }}">{{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <div class="card">
+    <form method="POST">
+      <div class="field">
+        <label>Email</label>
+        <input type="email" name="email" placeholder="you@email.com" required autofocus/>
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" name="password" placeholder="••••••••" required/>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full" style="margin-top:.4rem;">
+        Sign In
+      </button>
+    </form>
+  </div>
+
+  <p class="muted" style="text-align:center;margin-top:.9rem;font-size:.8rem;">
+    No account? <a href="{{ url_for('signup') }}" style="color:var(--text);font-weight:500;">Sign up</a>
+  </p>
+</div>
+{% endblock %}
