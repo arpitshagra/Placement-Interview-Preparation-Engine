@@ -319,22 +319,25 @@
       </div>
     </div>
 
-    <!-- JD Input -->
+    <!-- JD Input (Optional) -->
     <div class="card" style="margin-bottom: 0.85rem; padding: 1.2rem 1.5rem;">
-      <span class="lbl">💼 Job Description</span>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+        <span class="lbl" style="margin-bottom: 0;">💼 Job Description (Optional)</span>
+        <span class="muted" style="font-size: 0.74rem;">Leave empty to interview on your resume profile</span>
+      </div>
       <div style="display: flex; gap: 0.6rem; margin-bottom: 0.7rem; flex-wrap: wrap;">
         <button type="button" class="btn btn-sm" id="tabPaste"   onclick="switchJdTab('paste')"   style="background:var(--text);color:#fff;border-color:var(--text);">Paste Text</button>
         <button type="button" class="btn btn-sm" id="tabFile"    onclick="switchJdTab('file')">Upload File</button>
       </div>
 
       <div id="jdPastePanel">
-        <textarea id="jdText" placeholder="Paste the full job description here…" style="min-height:130px;font-size:0.83rem;"></textarea>
+        <textarea id="jdText" placeholder="Paste target job description (optional) — or leave blank to interview directly from your resume profile…" style="min-height:110px;font-size:0.83rem;"></textarea>
       </div>
       <div id="jdFilePanel" style="display:none;">
         <div class="drop-zone" id="jdDropZone">
           <input type="file" id="jdFile" accept=".pdf,.docx,.txt" onchange="handleJdFile(this)">
           <div class="drop-icon">📋</div>
-          <div class="drop-label">Click to browse JD file</div>
+          <div class="drop-label">Click to browse JD file (optional)</div>
           <div class="drop-hint">Supports PDF, DOCX, TXT</div>
           <div id="jdChosen" style="display:none;">
             <span class="file-chosen">✓ <span id="jdFileName"></span></span>
@@ -451,14 +454,6 @@
     <div id="analysisSection" class="hidden">
       <hr class="divider"/>
       <p id="transcriptBox" style="font-size:.81rem;color:var(--muted);font-style:italic;line-height:1.55;"></p>
-      <div id="chips" style="display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.6rem;"></div>
-      <div id="rubricFeedbackBox" class="rubric-live-grid" style="display:none;">
-        <div class="rubric-live-cell">Technical Accuracy <strong id="liveTechAcc">—</strong></div>
-        <div class="rubric-live-cell">Problem Solving    <strong id="liveProbSolv">—</strong></div>
-        <div class="rubric-live-cell">Clarity            <strong id="liveClarity">—</strong></div>
-        <div class="rubric-live-cell">Grounding          <strong id="liveGrounding">—</strong></div>
-      </div>
-      <p id="liveFeedbackText" style="font-size:0.78rem;color:var(--green);margin-top:0.4rem;line-height:1.4;"></p>
     </div>
   </div>
 </div>
@@ -604,11 +599,6 @@ async function submitUpload() {
     alert("Please upload your resume (PDF or DOCX).");
     return;
   }
-  const jdFileProvided = jdFileInput && jdFileInput.files[0];
-  if (!jdTextVal && !jdFileProvided) {
-    alert("Please paste your job description or upload a JD file.");
-    return;
-  }
 
   // Show overlay
   $("analyseBtn").disabled = true;
@@ -620,7 +610,7 @@ async function submitUpload() {
   formData.append("experience",  $("experience").value);
   if (jdTextVal) {
     formData.append("jd_text", jdTextVal);
-  } else {
+  } else if (jdFileInput && jdFileInput.files[0]) {
     formData.append("jd_file", jdFileInput.files[0]);
   }
 
@@ -888,21 +878,12 @@ async function submitAnswer(text) {
     $("loader").style.display = "none";
     if (data.error) { alert(data.error); resetUI(); return; }
 
-    $("analysisSection").classList.remove("hidden");
-    $("transcriptBox").textContent = `"${data.transcription}"`;
-
-    $("rubricFeedbackBox").style.display = "grid";
-    $("liveTechAcc").textContent  = `${data.technical_accuracy  || data.quality_score || 5}/10`;
-    $("liveProbSolv").textContent = `${data.problem_solving     || data.quality_score || 5}/10`;
-    $("liveClarity").textContent  = `${data.communication_clarity || data.quality_score || 5}/10`;
-    $("liveGrounding").textContent= `${data.evidence_grounding  || data.quality_score || 5}/10`;
-    $("liveFeedbackText").textContent = data.rubric_feedback || "";
-
     if (data.finished) {
       if (data.interview_id) $("viewFullReportBtn").href = `/report/${data.interview_id}`;
       showFeedback(data);
     } else {
-      updateTopicBanner(data.topic_name, data.topic_type, data.evidence_reason, data.is_followup);
+      setStatus("Answer recorded. Moving to next topic…");
+      updateTopicBanner(data.topic_name, data.topic_type, data.evidence_reason, false);
       $("questionText").textContent = data.next_question;
       setProgress(data.question_num, data.total_q, data.difficulty || "medium");
       playAudio(data.audio_url);

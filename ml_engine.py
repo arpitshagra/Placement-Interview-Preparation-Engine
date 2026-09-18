@@ -195,6 +195,9 @@ def analyze_skills_with_pandas(resume_data: dict, jd_data: dict, tfidf_result: d
 
     # Matched / Missing lists
     matched_skills = df[df["is_matched"] & (df["source"] == "Job Description")]["skill"].tolist()
+    if not matched_skills:
+        # If JD was optional or not provided, candidate's top resume skills are highlighted
+        matched_skills = df[df["is_matched"]]["skill"].tolist()[:8]
     missing_skills = df[~df["is_matched"] & req_mask]["skill"].tolist()
     missing_preferred = df[~df["is_matched"] & pref_mask]["skill"].tolist()
     bonus_skills = df[df["source"] == "Resume Only"]["skill"].tolist()
@@ -287,7 +290,7 @@ def select_topics_with_evidence(
         "focus_area": f"Deep dive into candidate's project '{proj_name}' and mastery of {skill_focus_1}",
         "evidence_reason": (
             f"Candidate claims '{proj_name}' using {proj_tech} on resume. "
-            f"Target JD for '{role}' requires practical {skill_focus_1} experience."
+            f"Evaluating practical implementation decisions, code quality, and depth in {skill_focus_1}."
         ),
         "target_skills": [skill_focus_1, proj_tech],
         "difficulty": "medium"
@@ -311,7 +314,7 @@ def select_topics_with_evidence(
         "focus_area": "System design trade-offs, state management, caching, and concurrency",
         "evidence_reason": (
             f"Candidate has background as {exp_summary}. "
-            f"JD requires {years_exp} with high-reliability system practices in {skill_focus_2}."
+            f"Evaluating architectural depth, state management, and high-reliability practices in {skill_focus_2}."
         ),
         "target_skills": [skill_focus_2, "System Architecture", "Performance"],
         "difficulty": "medium"

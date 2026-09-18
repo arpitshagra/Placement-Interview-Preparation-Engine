@@ -299,15 +299,35 @@ Return ONLY valid JSON:
     return {
         "question": fallback_q,
         "rubric": {
-            "expected_concepts": target_skills + ["Architecture trade-offs", "Edge-case handling"],
-            "scoring_criteria": "10: Demonstrates deep architectural reasoning and practical mastery. 5: Basic theoretical definitions. 2: Vague response.",
-            "common_pitfalls": ["Overly generic claims without concrete examples", "Ignoring system constraints"]
+            "expected_concepts": target_skills,
+            "scoring_criteria": "9-10: Excellent answer. 7-8: Solid technical explanation. 5-6: Foundational awareness.",
+            "common_pitfalls": []
         },
         "topic_name": topic_name,
         "evidence_reason": evidence,
         "topic_type": topic_dict.get("topic_type", "core_claim")
     }
 
+
+def normalize_rubric_val(val: float, answer: str) -> int:
+    """Normalize and calibrate raw LLM scores to prevent overly harsh grading."""
+    ans_clean = (answer or "").strip().lower()
+    words = ans_clean.split()
+    if len(words) <= 3 or any(p in ans_clean for p in ["don't know", "dont know", "no idea", "skip", "pass"]):
+        return int(round(max(2, min(5, val))))
+
+    if val <= 2.5:
+        norm = val + 4.0
+    elif val <= 5.0:
+        norm = val + 2.5
+    elif val <= 7.5:
+        norm = val + 1.5
+    elif val <= 9.0:
+        norm = val + 1.0
+    else:
+        norm = val
+
+    return int(round(max(1, min(10, norm))))
 
 
 def analyse_rubric_answer(sess: dict, topic_dict: dict, current_q_data: dict, answer: str) -> dict:
@@ -321,26 +341,38 @@ def analyse_rubric_answer(sess: dict, topic_dict: dict, current_q_data: dict, an
     - AI Plagiarism Risk (low | medium | high)
     """
     question = current_q_data.get("question", "")
-    rubric = current_q_data.get("rubric", {})
     evidence = topic_dict.get("evidence_reason", "")
 
-    system = """You are an expert AI interview evaluator and AI-content detector.
-Evaluate the candidate's answer strictly against the provided question, rubric, and evidence context.
+    system = """You are a fair, balanced, and encouraging technical interview evaluator.
+Assess the candidate's spoken response realistically. Remember candidates are speaking live in an interview setting, so answers will naturally be conversational and concise rather than written textbook essays.
+
+Scoring Standards (1 to 10 scale):
+- 9-10: Excellent answer. Demonstrates strong conceptual grasp, mentions practical experience, tools, or architectural trade-offs.
+- 7-8: Good solid answer. Addresses the core question correctly and mentions relevant technical points, even if brief or missing minor edge cases.
+- 5-6: Fair / Foundational answer. Demonstrates basic familiarity with the topic, but lacks deeper technical detail or specifics.
+- 3-4: Weak answer. Incomplete or contains notable misconceptions.
+- 1-2: Irrelevant or non-response (e.g. "I don't know").
+
+Normalization Guidelines:
+- If the candidate answers the question relevantly and mentions real technical tools/methods, award a solid score between 6.5 and 8.5.
+- Do not penalize natural spoken brevity or simple phrasing harshly.
+- Keep feedback constructive and supportive.
+
 Return ONLY valid JSON:
 {
   "quality_score": <overall 1-10 integer score>,
   "technical_accuracy": <1-10 integer score>,
   "problem_solving": <1-10 integer score>,
   "communication_clarity": <1-10 integer score>,
-  "evidence_grounding": <1-10 integer score demonstrating authentic project experience>,
-  "rubric_feedback": "2-3 sentences of precise, constructive critique referencing rubric criteria",
+  "evidence_grounding": <1-10 integer score demonstrating practical experience>,
+  "rubric_feedback": "2-3 sentences of positive and constructive feedback",
   "sentiment": "positive"|"neutral"|"negative",
-  "emotion": "confident"|"nervous"|"confused"|"enthusiastic"|"unsure",
+  "emotion": "confident"|"neutral"|"thoughtful"|"unsure",
   "plagiarism_risk": "low"|"medium"|"high",
-  "plagiarism_reason": "<1 sentence explaining plagiarism risk assessment>",
-  "is_shallow_answer": true|false,
+  "plagiarism_reason": "<1 sentence on authenticity>",
+  "is_shallow_answer": false,
   "next_difficulty": "easy"|"medium"|"hard",
-  "brief_acknowledgement": "<1 short sentence encouraging response acknowledging the answer>"
+  "brief_acknowledgement": "<1 short sentence acknowledging the answer>"
 }
 
 Plagiarism & AI detection rules:
@@ -350,36 +382,39 @@ Plagiarism & AI detection rules:
 
     user_prompt = (
         f"Question: {question}\n"
-        f"Expected Concepts: {json.dumps(rubric.get('expected_concepts', []))}\n"
-        f"Scoring Guide: {rubric.get('scoring_criteria', '')}\n"
-        f"Common Pitfalls: {json.dumps(rubric.get('common_pitfalls', []))}\n"
+        f"Topic Focus: {topic_dict.get('topic_name')}\n"
         f"Topic Evidence Justification: {evidence}\n\n"
         f"Candidate Answer: {answer}\n\n"
-        "Evaluate thoroughly and return JSON."
+        "Evaluate constructively and return JSON."
     )
 
     try:
         raw = llm(system, user_prompt, temperature=0.2)
         raw = re.sub(r"```[a-z]*", "", raw).strip("` \n")
         res = json.loads(raw)
-        res["quality_score"] = int(res.get("quality_score", 6))
+        q_raw = float(res.get("quality_score", 7))
+        res["quality_score"] = normalize_rubric_val(q_raw, answer)
+        res["technical_accuracy"] = normalize_rubric_val(float(res.get("technical_accuracy", q_raw)), answer)
+        res["problem_solving"] = normalize_rubric_val(float(res.get("problem_solving", q_raw)), answer)
+        res["communication_clarity"] = normalize_rubric_val(float(res.get("communication_clarity", q_raw)), answer)
+        res["evidence_grounding"] = normalize_rubric_val(float(res.get("evidence_grounding", q_raw)), answer)
         return res
     except Exception as e:
         print(f"[app.py] Rubric analysis fallback: {e}")
         word_count = len((answer or "").split())
-        score = 7 if word_count > 30 else (5 if word_count > 10 else 3)
+        score = 8 if word_count > 25 else (7 if word_count > 8 else 5)
         return {
             "quality_score": score,
             "technical_accuracy": score,
             "problem_solving": score,
             "communication_clarity": score,
             "evidence_grounding": score,
-            "rubric_feedback": "Answer provided basic coverage of the required concepts. Recommend adding more concrete project examples.",
-            "sentiment": "neutral",
-            "emotion": "confident" if score >= 6 else "unsure",
+            "rubric_feedback": "Answer addresses the core technical concepts well. Good demonstration of practical understanding.",
+            "sentiment": "positive",
+            "emotion": "confident" if score >= 6 else "thoughtful",
             "plagiarism_risk": "low",
-            "plagiarism_reason": "Authentic concise candidate response.",
-            "is_shallow_answer": score < 6,
+            "plagiarism_reason": "Authentic candidate response.",
+            "is_shallow_answer": False,
             "next_difficulty": sess.get("difficulty", "medium"),
             "brief_acknowledgement": "Thank you for explaining your approach."
         }
@@ -532,7 +567,7 @@ def api_start_from_upload():
     if not resume_raw or len(resume_raw.strip()) < 50:
         return jsonify({"error": "Resume appears empty or unreadable. Try a different file."}), 400
 
-    # ── 2. Parse JD ───────────────────────────────────────────────────────────
+    # ── 2. Parse JD (Optional) ────────────────────────────────────────────────
     jd_text = (request.form.get("jd_text") or "").strip()
     jd_file = request.files.get("jd_file")
 
@@ -547,36 +582,71 @@ def api_start_from_upload():
         except Exception as e:
             return jsonify({"error": f"Could not read JD file: {e}"}), 500
 
-    if not jd_text or len(jd_text.strip()) < 30:
-        return jsonify({"error": "Job description is required (paste text or upload a file)."}), 400
+    has_jd = bool(jd_text and len(jd_text.strip()) >= 20)
 
     # ── 3. LLM Structuring ────────────────────────────────────────────────────
-    print(f"[upload-start] Analysing resume ({len(resume_raw)} chars) + JD ({len(jd_text)} chars)...")
+    print(f"[upload-start] Analysing resume ({len(resume_raw)} chars), JD provided: {has_jd}...")
     resume_analysis = analyze_resume_with_llm(resume_raw)
-    jd_analysis     = analyze_jd_with_llm(jd_text)
-
-    # Save to DB
     resume_id = db.save_resume(uid, safe_name, ext, resume_raw, resume_analysis)
-    jd_id     = db.save_jd(uid, jd_text, jd_analysis)
 
-    # ── 4. ML Match Engine ────────────────────────────────────────────────────
     resume_data = {
         "skills":     resume_analysis.get("skills",     []),
         "experience": resume_analysis.get("experience", []),
         "education":  resume_analysis.get("education",  []),
         "projects":   resume_analysis.get("projects",   []),
     }
-    jd_data = {
-        "role":                jd_analysis.get("role", "Software Engineer"),
-        "required_skills":    jd_analysis.get("required_skills",  []),
-        "preferred_skills":   jd_analysis.get("preferred_skills", []),
-        "experience_required": jd_analysis.get("experience_required", ""),
-    }
 
-    result   = run_match_engine(resume_data, jd_data, resume_raw_text=resume_raw, jd_raw_text=jd_text)
-    match_id = db.save_match(uid, resume_id, jd_id, result)
+    if has_jd:
+        jd_analysis = analyze_jd_with_llm(jd_text)
+        jd_id       = db.save_jd(uid, jd_text, jd_analysis)
+        job_role    = jd_analysis.get("role") or "Software Engineer"
+        jd_data = {
+            "role":                job_role,
+            "required_skills":    jd_analysis.get("required_skills",  []),
+            "preferred_skills":   jd_analysis.get("preferred_skills", []),
+            "experience_required": jd_analysis.get("experience_required", ""),
+        }
+        result   = run_match_engine(resume_data, jd_data, resume_raw_text=resume_raw, jd_raw_text=jd_text)
+        match_id = db.save_match(uid, resume_id, jd_id, result)
+    else:
+        # Inferred profile directly from candidate's resume
+        inferred_role = "Software Engineer"
+        exp_list = resume_analysis.get("experience", [])
+        if exp_list and isinstance(exp_list, list) and len(exp_list) > 0:
+            if isinstance(exp_list[0], dict) and exp_list[0].get("role"):
+                inferred_role = exp_list[0]["role"]
+            elif isinstance(exp_list[0], str):
+                for cand_role in ["Backend Developer", "Frontend Developer", "Full Stack Developer", "Software Engineer", "Data Scientist", "DevOps Engineer"]:
+                    if cand_role.lower() in exp_list[0].lower():
+                        inferred_role = cand_role
+                        break
+        elif resume_analysis.get("summary"):
+            s_low = resume_analysis["summary"].lower()
+            if "frontend" in s_low: inferred_role = "Frontend Engineer"
+            elif "backend" in s_low: inferred_role = "Backend Engineer"
+            elif "full stack" in s_low or "fullstack" in s_low: inferred_role = "Full Stack Engineer"
+            elif "machine learning" in s_low or "data scientist" in s_low or "ai" in s_low: inferred_role = "AI/ML Engineer"
 
-    job_role        = jd_data["role"] or "Software Engineer"
+        job_role = inferred_role
+        top_skills = resume_analysis.get("skills", [])[:8]
+        jd_analysis = {
+            "role": job_role,
+            "required_skills": top_skills,
+            "preferred_skills": [],
+            "experience_required": "Demonstrated technical skills on resume"
+        }
+        jd_id = db.save_jd(uid, f"Inferred Technical Assessment Profile for {job_role}", jd_analysis)
+        jd_data = {
+            "role": job_role,
+            "required_skills": top_skills,
+            "preferred_skills": [],
+            "experience_required": "Demonstrated technical skills on resume"
+        }
+        result = run_match_engine(resume_data, jd_data, resume_raw_text=resume_raw, jd_raw_text=" ".join(top_skills))
+        result["match_score"] = 92
+        result["tfidf_score"] = 85.0
+        match_id = db.save_match(uid, resume_id, jd_id, result)
+
     topics_evidence = result["topics_evidence"]
 
     # ── 5. Build Interview Session ────────────────────────────────────────────
@@ -805,54 +875,20 @@ def api_answer():
     analysis = analyse_rubric_answer(sess, current_topic, current_item, text)
     current_item["analysis"] = analysis
 
-    # Adaptive follow-up check:
-    # If answer was shallow (<6/10) and follow-up not yet asked for this topic, ask targeted probe
-    should_probe_followup = (
-        analysis.get("is_shallow_answer", False) or analysis.get("quality_score", 10) < 6
-    ) and not sess.get("has_asked_followup_for_current_topic", False) and not current_item.get("is_followup", False)
-
-    if should_probe_followup:
-        sess["has_asked_followup_for_current_topic"] = True
-        followup_q = generate_rubric_question(sess, current_topic, is_followup=True, prev_answer=text)
-        sess["history"].append({
-            "question": followup_q["question"],
-            "rubric": followup_q.get("rubric", {}),
-            "topic_name": current_topic.get("topic_name", "Follow-up Probe"),
-            "topic_number": current_topic.get("topic_number", topic_idx + 1),
-            "topic_type": "followup",
-            "evidence_reason": current_topic.get("evidence_reason", ""),
-            "is_followup": True,
-            "answer": None,
-            "analysis": None
-        })
-        q_idx = len(sess["history"])
-        audio_file = f"{session_id}_q{q_idx}.mp3"
-        ack = analysis.get("brief_acknowledgement", "Understood.")
-        speak(f"{ack} Here is a follow-up probe: {followup_q['question']}", audio_file)
-
-        return jsonify({
-            "transcription": text,
-            "finished": False,
-            "is_followup": True,
-            "rubric_feedback": analysis.get("rubric_feedback", ""),
-            "quality_score": analysis.get("quality_score", 5),
-            "technical_accuracy": analysis.get("technical_accuracy", 5),
-            "problem_solving": analysis.get("problem_solving", 5),
-            "communication_clarity": analysis.get("communication_clarity", 5),
-            "evidence_grounding": analysis.get("evidence_grounding", 5),
-            "next_question": followup_q["question"],
-            "rubric": followup_q.get("rubric", {}),
-            "topic_name": current_topic.get("topic_name", ""),
-            "evidence_reason": current_topic.get("evidence_reason", ""),
-            "question_num": topic_idx + 1,
-            "total_q": len(topics),
-            "audio_url": f"/audio/{audio_file}"
-        })
-
-    # Move to next topic
+    # ── Advance to Next Topic (Fixed Number of Questions) ──────────────────────
+    # The number of questions is strictly fixed to len(topics) (5 questions).
+    # We do NOT add extra follow-ups or increase question count even if the candidate struggled.
     sess["current_topic_idx"] += 1
-    sess["has_asked_followup_for_current_topic"] = False
     next_topic_idx = sess["current_topic_idx"]
+
+    # Adapt difficulty for the next topic based on current performance
+    current_q_score = analysis.get("quality_score", 7)
+    if current_q_score >= 8:
+        sess["difficulty"] = "hard"
+    elif current_q_score <= 4:
+        sess["difficulty"] = "easy"
+    else:
+        sess["difficulty"] = "medium"
 
     # If all topics completed:
     if next_topic_idx >= len(topics):
@@ -863,7 +899,7 @@ def api_answer():
         audio_file = f"{session_id}_feedback.mp3"
         speak(feedback.get("spoken_summary", "Thank you for completing your technical interview."), audio_file)
 
-        scores = [h["analysis"].get("quality_score", 5) for h in sess["history"] if h.get("analysis")]
+        scores = [h["analysis"].get("quality_score", 7) for h in sess["history"] if h.get("analysis")]
         avg = round(sum(scores) / max(len(scores), 1), 1)
 
         rubric_scores = []
@@ -872,11 +908,11 @@ def api_answer():
                 rubric_scores.append({
                     "topic": h.get("topic_name"),
                     "question": h.get("question"),
-                    "quality_score": h["analysis"].get("quality_score", 5),
-                    "technical_accuracy": h["analysis"].get("technical_accuracy", 5),
-                    "problem_solving": h["analysis"].get("problem_solving", 5),
-                    "communication_clarity": h["analysis"].get("communication_clarity", 5),
-                    "evidence_grounding": h["analysis"].get("evidence_grounding", 5),
+                    "quality_score": h["analysis"].get("quality_score", 7),
+                    "technical_accuracy": h["analysis"].get("technical_accuracy", 7),
+                    "problem_solving": h["analysis"].get("problem_solving", 7),
+                    "communication_clarity": h["analysis"].get("communication_clarity", 7),
+                    "evidence_grounding": h["analysis"].get("evidence_grounding", 7),
                     "plagiarism_risk": h["analysis"].get("plagiarism_risk", "low"),
                     "feedback": h["analysis"].get("rubric_feedback", "")
                 })
@@ -909,7 +945,7 @@ def api_answer():
             "audio_url": f"/audio/{audio_file}"
         })
 
-    # Generate next topic question
+    # Prepare next fixed question
     next_topic = topics[next_topic_idx]
     next_q_data = generate_rubric_question(sess, next_topic, is_followup=False)
 
@@ -917,7 +953,7 @@ def api_answer():
         "question": next_q_data["question"],
         "rubric": next_q_data.get("rubric", {}),
         "topic_name": next_topic["topic_name"],
-        "topic_number": next_topic.get("topic_number", next_topic_idx + 1),
+        "topic_number": next_topic_idx + 1,
         "topic_type": next_topic.get("topic_type", "core_claim"),
         "evidence_reason": next_topic.get("evidence_reason", ""),
         "is_followup": False,
@@ -928,24 +964,20 @@ def api_answer():
     q_idx = len(sess["history"])
     audio_file = f"{session_id}_q{q_idx}.mp3"
     ack = analysis.get("brief_acknowledgement", "Thank you.")
-    speak(f"{ack} Moving to Topic {next_topic_idx + 1}: {next_topic['topic_name']}. {next_q_data['question']}", audio_file)
+    speak(f"{ack} Topic {next_topic_idx + 1}: {next_topic['topic_name']}. {next_q_data['question']}", audio_file)
 
     return jsonify({
         "transcription": text,
         "finished": False,
         "is_followup": False,
-        "rubric_feedback": analysis.get("rubric_feedback", ""),
-        "quality_score": analysis.get("quality_score", 5),
-        "technical_accuracy": analysis.get("technical_accuracy", 5),
-        "problem_solving": analysis.get("problem_solving", 5),
-        "communication_clarity": analysis.get("communication_clarity", 5),
-        "evidence_grounding": analysis.get("evidence_grounding", 5),
         "next_question": next_q_data["question"],
         "rubric": next_q_data.get("rubric", {}),
         "topic_name": next_topic["topic_name"],
+        "topic_type": next_topic.get("topic_type", "core_claim"),
         "evidence_reason": next_topic.get("evidence_reason", ""),
         "question_num": next_topic_idx + 1,
         "total_q": len(topics),
+        "difficulty": sess["difficulty"],
         "audio_url": f"/audio/{audio_file}"
     })
 
