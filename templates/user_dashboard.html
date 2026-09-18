@@ -11,7 +11,10 @@
       {{ user.college or '' }}{% if user.college and user.target_company %} · {% endif %}{{ user.target_company or '' }}
     </p>
   </div>
-  <a href="{{ url_for('interview_page') }}" class="btn btn-primary">+ New Interview</a>
+  <div class="row">
+    <a href="{{ url_for('interview_page') }}"   class="btn btn-primary">+ New Interview</a>
+    <a href="{{ url_for('resume_match_page') }}" class="btn">📄 Resume Matcher</a>
+  </div>
 </div>
 
 <!-- Stats: total, avg score, last interview date -->
@@ -38,6 +41,20 @@
     <div><span class="muted">Phone</span><br>{{ user.phone or '—' }}</div>
     <div style="margin-top:.7rem;"><span class="muted">College</span><br>{{ user.college or '—' }}</div>
     <div style="margin-top:.7rem;"><span class="muted">Target Company</span><br>{{ user.target_company or '—' }}</div>
+  </div>
+</div>
+
+<!-- Resume Matcher Shortcut -->
+<div class="card" style="background:linear-gradient(135deg,#1c1c1a 0%,#2d2d2b 100%);border:none;color:#fff;">
+  <div class="row" style="justify-content:space-between;align-items:center;">
+    <div>
+      <div style="font-size:.78rem;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#aaa;margin-bottom:.3rem;">NEW FEATURE</div>
+      <div style="font-size:1rem;font-weight:600;">Resume × Job Description Matcher</div>
+      <p style="font-size:.82rem;color:#bbb;margin-top:.3rem;">Upload your resume, paste a JD, and get an AI-powered match score with skill gap analysis.</p>
+    </div>
+    <a href="{{ url_for('resume_match_page') }}" class="btn" style="background:#fff;color:#1c1c1a;border:none;white-space:nowrap;flex-shrink:0;">
+      Open Matcher →
+    </a>
   </div>
 </div>
 

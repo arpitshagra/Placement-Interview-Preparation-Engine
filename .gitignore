@@ -1,5 +1,6 @@
 API_KEY.env
 .env
 responses/
+uploads/
 __pycache__/
 *.db

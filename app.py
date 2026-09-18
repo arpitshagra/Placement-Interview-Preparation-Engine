@@ -26,8 +26,15 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "API_KEY.env"))
 app = Flask(__name__)
 app.secret_key = "interview-bot-secret"          # used to sign session cookies
 
-AUDIO_FOLDER = "responses"                        # folder to store .wav files
-os.makedirs(AUDIO_FOLDER, exist_ok=True)
+AUDIO_FOLDER   = "responses"    # folder to store .wav / .mp3 files
+UPLOADS_FOLDER = "uploads"      # folder to store uploaded resume files
+os.makedirs(AUDIO_FOLDER,   exist_ok=True)
+os.makedirs(UPLOADS_FOLDER, exist_ok=True)
+
+ALLOWED_RESUME_EXTENSIONS = {"pdf", "docx"}
+
+def allowed_resume(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_RESUME_EXTENSIONS
 
 db.init_db()                                      # create DB tables on startup
 
@@ -191,17 +198,34 @@ def delete_user(uid):
 # LLM HELPER FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
+AVAILABLE_MODELS = [
+    os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
+    "groq/compound-mini",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+]
+
 def llm(system: str, user: str, temperature: float = 0.4) -> str:
-    """Send a prompt to Groq LLM and return the response text."""
-    resp = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        temperature=temperature,                  # lower = more focused, higher = more creative
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user",   "content": user},
-        ],
-    )
-    return resp.choices[0].message.content.strip()
+    """Send a prompt to Groq LLM and return the response text with fallback model support."""
+    last_error = None
+    for model_name in AVAILABLE_MODELS:
+        try:
+            resp = groq_client.chat.completions.create(
+                model=model_name,
+                temperature=temperature,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user},
+                ],
+            )
+            return resp.choices[0].message.content.strip()
+        except Exception as e:
+            last_error = e
+            continue
+    raise RuntimeError(f"All Groq models failed. Last error: {last_error}")
+
 
 def generate_question(sess: dict) -> str:
     """Ask the LLM to generate one interview question based on job role and difficulty."""
@@ -518,6 +542,296 @@ def audio(filename):
     mime = "audio/mpeg" if filename.endswith(".mp3") else "audio/wav"
     return send_file(path, mimetype=mime)
 
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# RESUME / JD ANALYSIS — LLM HELPERS
+# ═════════════════════════════════════════════════════════════════════════════
+
+def analyze_resume_with_llm(raw_text: str) -> dict:
+    """Use Groq LLM to extract structured information from raw resume text."""
+    system = """You are an expert resume parser and career analyst.
+Extract all information from the resume text and return ONLY valid JSON — no markdown, no extra text.
+Schema:
+{
+  "skills":     ["skill1", "skill2"],
+  "projects":   [{"name":"...", "description":"...", "technologies":["..."]}],
+  "education":  [{"degree":"...", "institution":"...", "year":"..."}],
+  "experience": [{"role":"...", "company":"...", "duration":"...", "description":"..."}],
+  "strengths":  ["strength1", "strength2"],
+  "weaknesses": ["weakness1", "weakness2"],
+  "summary":    "2–3 sentence professional summary of the candidate"
+}
+Be thorough. Extract every skill, technology, tool mentioned. Infer strengths from experience and projects."""
+
+    raw = llm(system, f"Resume text:\n\n{raw_text[:5000]}", temperature=0.2)
+    raw = re.sub(r"```[a-z]*", "", raw).strip("` \n")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"skills": [], "projects": [], "education": [],
+                "experience": [], "strengths": [], "weaknesses": [], "summary": ""}
+
+
+def analyze_jd_with_llm(jd_text: str) -> dict:
+    """Use Groq LLM to extract structured information from a job description."""
+    system = """You are an expert job description analyst and HR specialist.
+Extract all key information and return ONLY valid JSON — no markdown, no extra text.
+Schema:
+{
+  "role":                "exact job title",
+  "required_skills":    ["must-have skill 1", "must-have skill 2"],
+  "preferred_skills":   ["nice-to-have skill 1", "nice-to-have skill 2"],
+  "experience_required": "e.g. 3-5 years of backend development"
+}
+Be exhaustive — extract every technical skill, soft skill, tool, framework, language mentioned."""
+
+    raw = llm(system, f"Job Description:\n\n{jd_text[:5000]}", temperature=0.2)
+    raw = re.sub(r"```[a-z]*", "", raw).strip("` \n")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"role": "", "required_skills": [], "preferred_skills": [], "experience_required": ""}
+
+
+def run_match_engine(resume_data: dict, jd_data: dict) -> dict:
+    """
+    Use Groq LLM to compare resume against JD and produce a match report.
+    resume_data and jd_data are dicts with Python lists (already parsed from JSON).
+    """
+    system = """You are an expert ATS (Applicant Tracking System) and senior career coach.
+Analyse the resume data versus the job description data and return ONLY valid JSON — no markdown.
+Schema:
+{
+  "match_score": <integer 0-100>,
+  "matched_skills":    ["skill that appears in both"],
+  "missing_skills":    ["required skill absent from resume"],
+  "improvement_areas": [
+    {"area": "Short title", "suggestion": "Specific, actionable 1-2 sentence advice"}
+  ]
+}
+Rules:
+- match_score: percentage of required JD skills found in resume (weighted by experience depth).
+- matched_skills: skills that appear in both the resume and the JD (required OR preferred).
+- missing_skills: required JD skills completely absent from resume.
+- improvement_areas: 3-5 concrete suggestions to close the gap or strengthen the application."""
+
+    user_payload = (
+        f"RESUME SKILLS: {json.dumps(resume_data.get('skills', []))}\n"
+        f"RESUME EXPERIENCE: {json.dumps(resume_data.get('experience', []))}\n"
+        f"RESUME EDUCATION: {json.dumps(resume_data.get('education', []))}\n"
+        f"RESUME PROJECTS: {json.dumps(resume_data.get('projects', []))}\n\n"
+        f"JD ROLE: {jd_data.get('role', '')}\n"
+        f"JD REQUIRED SKILLS: {json.dumps(jd_data.get('required_skills', []))}\n"
+        f"JD PREFERRED SKILLS: {json.dumps(jd_data.get('preferred_skills', []))}\n"
+        f"JD EXPERIENCE REQUIRED: {jd_data.get('experience_required', '')}"
+    )
+
+    raw = llm(system, user_payload, temperature=0.2)
+    raw = re.sub(r"```[a-z]*", "", raw).strip("` \n")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"match_score": 0, "matched_skills": [], "missing_skills": [], "improvement_areas": []}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# RESUME / JD / MATCH ROUTES
+# ═════════════════════════════════════════════════════════════════════════════
+
+@app.route("/resume")
+@login_required
+def resume_match_page():
+    """Main Resume & JD Matcher page."""
+    uid     = session["user_id"]
+    resumes = db.get_user_resumes(uid)
+    jds     = db.get_user_jds(uid)
+    matches = db.get_user_matches(uid)
+    return render_template("resume_match.html",
+                           resumes=resumes, jds=jds, matches=matches)
+
+
+# ── Resume Upload & Parse ─────────────────────────────────────────────────────
+
+@app.route("/api/resume/upload", methods=["POST"])
+@login_required
+def api_resume_upload():
+    """
+    Accept a PDF or DOCX file upload, parse it, analyse with LLM, save to DB.
+    Returns the full analysis JSON plus the new resume_id.
+    """
+    if "resume" not in request.files:
+        return jsonify({"error": "No file part in request"}), 400
+
+    file = request.files["resume"]
+    if not file or not file.filename:
+        return jsonify({"error": "No file selected"}), 400
+    if not allowed_resume(file.filename):
+        return jsonify({"error": "Only PDF and DOCX files are supported"}), 400
+
+    uid       = session["user_id"]
+    ext       = file.filename.rsplit(".", 1)[1].lower()
+    safe_name = f"resume_{uid}_{uuid.uuid4().hex[:8]}.{ext}"
+    filepath  = os.path.join(UPLOADS_FOLDER, safe_name)
+    file.save(filepath)
+
+    # Parse raw text
+    try:
+        from resume_parser import parse_resume
+        raw_text = parse_resume(filepath, ext)
+    except Exception as exc:
+        os.remove(filepath)
+        return jsonify({"error": f"Could not parse file: {exc}"}), 500
+
+    if not raw_text.strip():
+        os.remove(filepath)
+        return jsonify({"error": "No text could be extracted. Try a text-based PDF or DOCX."}), 400
+
+    # LLM analysis
+    analysis   = analyze_resume_with_llm(raw_text)
+    resume_id  = db.save_resume(uid, file.filename, ext, raw_text, analysis)
+
+    return jsonify({"success": True, "resume_id": resume_id, "analysis": analysis})
+
+
+# ── JD Analysis ───────────────────────────────────────────────────────────────
+
+@app.route("/api/jd/analyze", methods=["POST"])
+@login_required
+def api_jd_analyze():
+    """
+    Accept a JD as plain text (JSON body) or as a file upload (multipart).
+    Analyse with LLM and save to DB. Returns the analysis + jd_id.
+    """
+    uid = session["user_id"]
+
+    # Support both JSON body and multipart upload
+    if request.content_type and "multipart" in request.content_type:
+        jd_file = request.files.get("jd_file")
+        if not jd_file:
+            return jsonify({"error": "No JD file uploaded"}), 400
+        ext = jd_file.filename.rsplit(".", 1)[-1].lower() if "." in jd_file.filename else ""
+        safe = f"jd_{uid}_{uuid.uuid4().hex[:8]}.{ext}"
+        fp   = os.path.join(UPLOADS_FOLDER, safe)
+        jd_file.save(fp)
+        try:
+            from resume_parser import parse_resume
+            jd_text = parse_resume(fp, ext)
+        except Exception as exc:
+            return jsonify({"error": f"Could not read JD file: {exc}"}), 500
+    else:
+        data    = request.get_json() or {}
+        jd_text = (data.get("jd_text") or "").strip()
+
+    if not jd_text:
+        return jsonify({"error": "JD text is empty"}), 400
+
+    analysis = analyze_jd_with_llm(jd_text)
+    jd_id    = db.save_jd(uid, jd_text, analysis)
+
+    return jsonify({"success": True, "jd_id": jd_id, "analysis": analysis})
+
+
+# ── Match Engine ──────────────────────────────────────────────────────────────
+
+@app.route("/api/match", methods=["POST"])
+@login_required
+def api_match():
+    """
+    Run the Resume × JD match engine.
+    Expects JSON: { resume_id, jd_id }
+    Returns: match_score, matched_skills, missing_skills, improvement_areas
+    """
+    data      = request.get_json() or {}
+    resume_id = data.get("resume_id")
+    jd_id     = data.get("jd_id")
+
+    if not resume_id or not jd_id:
+        return jsonify({"error": "Both resume_id and jd_id are required"}), 400
+
+    uid = session["user_id"]
+
+    resume_row = db.get_resume_by_id(resume_id, uid)
+    jd_row     = db.get_jd_by_id(jd_id, uid)
+
+    if not resume_row:
+        return jsonify({"error": "Resume not found or access denied"}), 404
+    if not jd_row:
+        return jsonify({"error": "Job description not found or access denied"}), 404
+
+    # Deserialise JSON strings stored in DB
+    resume_data = {
+        "skills":     json.loads(resume_row.get("skills",     "[]")),
+        "experience": json.loads(resume_row.get("experience", "[]")),
+        "education":  json.loads(resume_row.get("education",  "[]")),
+        "projects":   json.loads(resume_row.get("projects",   "[]")),
+    }
+    jd_data = {
+        "role":                jd_row["role"],
+        "required_skills":    json.loads(jd_row.get("required_skills",  "[]")),
+        "preferred_skills":   json.loads(jd_row.get("preferred_skills", "[]")),
+        "experience_required": jd_row["experience_required"],
+    }
+
+    result   = run_match_engine(resume_data, jd_data)
+    match_id = db.save_match(uid, resume_id, jd_id, result)
+
+    return jsonify({
+        "success":           True,
+        "match_id":          match_id,
+        "match_score":       result["match_score"],
+        "matched_skills":    result["matched_skills"],
+        "missing_skills":    result["missing_skills"],
+        "improvement_areas": result["improvement_areas"],
+    })
+
+
+# ── Load existing resume for the Matcher UI ────────────────────────────────
+
+@app.route("/api/resume/load/<int:resume_id>")
+@login_required
+def api_resume_load(resume_id):
+    """Return a previously parsed resume so the UI can pre-fill the analysis panel."""
+    uid = session["user_id"]
+    row = db.get_resume_by_id(resume_id, uid)
+    if not row:
+        return jsonify({"error": "Resume not found"}), 404
+
+    analysis = {
+        "skills":     json.loads(row.get("skills",     "[]")),
+        "projects":   json.loads(row.get("projects",   "[]")),
+        "education":  json.loads(row.get("education",  "[]")),
+        "experience": json.loads(row.get("experience", "[]")),
+        "strengths":  json.loads(row.get("strengths",  "[]")),
+        "weaknesses": json.loads(row.get("weaknesses", "[]")),
+        "summary":    row.get("summary", ""),
+    }
+    return jsonify({"success": True, "resume_id": resume_id, "analysis": analysis})
+
+
+# ── Load existing JD for the Matcher UI ───────────────────────────────────
+
+@app.route("/api/jd/load/<int:jd_id>")
+@login_required
+def api_jd_load(jd_id):
+    """Return a previously parsed JD so the UI can pre-fill the analysis panel."""
+    uid = session["user_id"]
+    row = db.get_jd_by_id(jd_id, uid)
+    if not row:
+        return jsonify({"error": "JD not found"}), 404
+
+    analysis = {
+        "role":                row.get("role", ""),
+        "required_skills":    json.loads(row.get("required_skills",  "[]")),
+        "preferred_skills":   json.loads(row.get("preferred_skills", "[]")),
+        "experience_required": row.get("experience_required", ""),
+    }
+    return jsonify({"success": True, "jd_id": jd_id,
+                    "jd_text": row.get("jd_text", ""), "analysis": analysis})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SERVER STARTUP
 # ─────────────────────────────────────────────────────────────────────────────
 
 def find_available_port(preferred_port: int) -> int:
@@ -530,10 +844,12 @@ def find_available_port(preferred_port: int) -> int:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
 
+
 if __name__ == "__main__":
     preferred_port = int(os.environ.get("PORT", 5000))
     port = find_available_port(preferred_port)
     if port != preferred_port:
         print(f"Port {preferred_port} is in use; using port {port} instead.")
-    print(f"Starting AI Interview Bot → http://localhost:{port}")
+    print(f"Starting AI Interview Bot -> http://localhost:{port}")
     app.run(debug=True, host="0.0.0.0", port=port, use_reloader=False, threaded=True)
+
