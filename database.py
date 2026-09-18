@@ -380,6 +380,114 @@ def delete_user(uid: Any):
             print(f"[Supabase] Note deleting auth user: {e}")
 
 
+def verify_supabase_token(access_token: str) -> Optional[Dict[str, Any]]:
+    """
+    Validate a Supabase JWT access token and return user details.
+    Returns user dict with id, email, user_metadata if valid, or None if invalid/expired.
+    """
+    if not access_token or not isinstance(access_token, str):
+        return None
+    token = access_token.strip()
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+    if not token:
+        return None
+
+    try:
+        sb = _get_active_client()
+        user_response = sb.auth.get_user(token)
+        if not user_response or not getattr(user_response, "user", None):
+            return None
+        user = user_response.user
+
+        user_id = str(getattr(user, "id", "") or (user.get("id") if isinstance(user, dict) else ""))
+        email = getattr(user, "email", "") or (user.get("email") if isinstance(user, dict) else "")
+        metadata = getattr(user, "user_metadata", {}) or (user.get("user_metadata", {}) if isinstance(user, dict) else {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        return {
+            "id": user_id,
+            "email": email,
+            "user_metadata": metadata,
+            "raw_user": user
+        }
+    except Exception as exc:
+        print(f"[Supabase Auth] Token verification failed: {exc}")
+        return None
+
+
+def sync_oauth_user(user_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Synchronize an authenticated OAuth user (e.g. from Google) into public.users.
+    Extracts user id, email, and user_metadata (name, full_name, avatar_url),
+    upserting into public.users without requiring a password.
+    Returns the profile dictionary from public.users.
+    """
+    user_id = str(user_info.get("id", "")).strip()
+    email = str(user_info.get("email", "")).strip().lower()
+    metadata = user_info.get("user_metadata") or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    if not user_id or not email:
+        return None
+
+    # Derive display name from metadata or email prefix
+    name = (
+        metadata.get("full_name")
+        or metadata.get("name")
+        or metadata.get("given_name")
+        or (email.split("@")[0].capitalize() if email else "User")
+    )
+
+    sb = _get_active_client()
+    try:
+        # Check if user already exists by id
+        res = sb.table("users").select("*").eq("id", user_id).execute()
+        if res.data:
+            existing_user = res.data[0]
+            updates = {}
+            if not existing_user.get("name") and name:
+                updates["name"] = name
+            if updates:
+                sb.table("users").update(updates).eq("id", user_id).execute()
+                existing_user.update(updates)
+            return existing_user
+
+        # If not found by id, check if existing by email
+        email_res = sb.table("users").select("*").eq("email", email).execute()
+        if email_res.data:
+            existing_by_email = email_res.data[0]
+            return existing_by_email
+
+        # User is brand new — create in public.users
+        profile = {
+            "id": user_id,
+            "name": name,
+            "email": email,
+            "password": "",
+            "phone": metadata.get("phone", ""),
+            "college": metadata.get("college", ""),
+            "target_company": metadata.get("target_company", ""),
+            "role": metadata.get("role", "user")
+        }
+        sb.table("users").insert(profile).execute()
+        return profile
+    except Exception as exc:
+        print(f"[Supabase Auth] Error syncing OAuth user {email}: {exc}")
+        fallback = get_user_by_email(email)
+        if fallback:
+            return fallback
+        return {
+            "id": user_id,
+            "name": name,
+            "email": email,
+            "role": "user"
+        }
+
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # INTERVIEW HELPERS
 # ─────────────────────────────────────────────────────────────────────────────

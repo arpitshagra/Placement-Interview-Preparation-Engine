@@ -177,7 +177,7 @@
       <a href="{{ url_for('resume_match_page') }}">Resume Matcher</a>
     {% endif %}
     <span>{{ session.name }}</span>
-    <a href="{{ url_for('logout') }}">Logout</a>
+    <a href="{{ url_for('logout') }}" id="logoutLink" onclick="handleSupabaseLogout(event)">Logout</a>
   </div>
 </nav>
 {% endif %}
@@ -190,5 +190,10 @@
   {% endwith %}
   {% block content %}{% endblock %}
 </div>
+
+<!-- Supabase JS Client & Auth Helper -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="{{ url_for('static', filename='js/supabaseAuth.js') }}"></script>
+{% block extra_scripts %}{% endblock %}
 </body>
 </html>

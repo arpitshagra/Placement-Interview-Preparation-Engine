@@ -55,14 +55,42 @@ groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))   # Groq LLM client
 interview_sessions: dict = {}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AUTH DECORATORS
+# AUTH DECORATORS & HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _extract_and_verify_token():
+    """Helper to verify Bearer token from header or request args and populate session."""
+    auth_header = request.headers.get("Authorization", "")
+    token = None
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    elif request.args.get("access_token"):
+        token = request.args.get("access_token").strip()
+
+    if token:
+        verified = db.verify_supabase_token(token)
+        if verified:
+            profile = db.sync_oauth_user(verified)
+            if profile:
+                session["user_id"] = profile["id"]
+                session["name"] = profile.get("name", "User")
+                session["role"] = profile.get("role", "user")
+                session["user_email"] = profile.get("email", "")
+                return profile
+    return None
+
 def login_required(f):
-    """Redirect to login page if user is not logged in."""
+    """
+    Protect routes: accepts active Flask session or Supabase Bearer token.
+    Redirects HTML requests to /login and returns 401 JSON for API requests.
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
         if "user_id" not in session:
+            _extract_and_verify_token()
+        if "user_id" not in session:
+            if request.path.startswith("/api/") or request.is_json:
+                return jsonify({"error": "Unauthorized", "message": "Authentication required."}), 401
             return redirect(url_for("login"))
         return f(*args, **kwargs)
     return decorated
@@ -72,8 +100,14 @@ def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if "user_id" not in session:
+            _extract_and_verify_token()
+        if "user_id" not in session:
+            if request.path.startswith("/api/") or request.is_json:
+                return jsonify({"error": "Unauthorized", "message": "Authentication required."}), 401
             return redirect(url_for("login"))
         if session.get("role") != "admin":
+            if request.path.startswith("/api/") or request.is_json:
+                return jsonify({"error": "Forbidden", "message": "Admin privileges required."}), 403
             return redirect(url_for("user_dashboard"))
         return f(*args, **kwargs)
     return decorated
@@ -81,6 +115,70 @@ def admin_required(f):
 # ─────────────────────────────────────────────────────────────────────────────
 # AUTH ROUTES
 # ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/config", methods=["GET"])
+def get_public_config():
+    """
+    Public configuration endpoint providing Supabase URL and Anon Key.
+    Does NOT expose service role keys or Google OAuth secrets.
+    """
+    return jsonify({
+        "supabase_url": os.getenv("SUPABASE_URL", "").strip(),
+        "supabase_anon_key": os.getenv("SUPABASE_KEY", "").strip()
+    })
+
+@app.route("/api/auth/session", methods=["POST"])
+def sync_auth_session():
+    """
+    Establish a server-side session from a client-side Supabase JWT access token.
+    Called right after successful Google OAuth or client-side authentication.
+    """
+    token = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token and request.is_json:
+        data = request.get_json(silent=True) or {}
+        token = data.get("access_token", "").strip()
+
+    if not token:
+        return jsonify({"success": False, "error": "Missing access token."}), 400
+
+    verified_user = db.verify_supabase_token(token)
+    if not verified_user:
+        return jsonify({"success": False, "error": "Invalid or expired access token."}), 401
+
+    profile = db.sync_oauth_user(verified_user)
+    if not profile:
+        return jsonify({"success": False, "error": "Failed to sync user profile."}), 500
+
+    session["user_id"] = profile["id"]
+    session["name"] = profile.get("name", "User")
+    session["role"] = profile.get("role", "user")
+    session["user_email"] = profile.get("email", "")
+
+    redirect_target = url_for("admin_dashboard") if profile.get("role") == "admin" else url_for("user_dashboard")
+    return jsonify({
+        "success": True,
+        "redirect": redirect_target,
+        "user": {
+            "id": profile["id"],
+            "name": profile.get("name", ""),
+            "email": profile.get("email", ""),
+            "role": profile.get("role", "user")
+        }
+    })
+
+@app.route("/api/auth/logout", methods=["POST"])
+def api_logout():
+    """Clear Flask session on client-side sign out."""
+    session.clear()
+    return jsonify({"success": True, "redirect": url_for("login")})
+
+@app.route("/auth/callback")
+def auth_callback():
+    """Client-side OAuth callback page handling Supabase redirect and session sync."""
+    return render_template("auth_callback.html")
 
 @app.route("/")
 def index():
@@ -94,6 +192,11 @@ def index():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     """Show login form (GET) or process login (POST)."""
+    if request.method == "GET" and "user_id" in session:
+        if session.get("role") == "admin":
+            return redirect(url_for("admin_dashboard"))
+        return redirect(url_for("user_dashboard"))
+
     if request.method == "POST":
         email    = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
@@ -118,6 +221,11 @@ def login():
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     """Show signup form (GET) or create new account (POST)."""
+    if request.method == "GET" and "user_id" in session:
+        if session.get("role") == "admin":
+            return redirect(url_for("admin_dashboard"))
+        return redirect(url_for("user_dashboard"))
+
     if request.method == "POST":
         name           = request.form.get("name", "").strip()
         email          = request.form.get("email", "").strip().lower()

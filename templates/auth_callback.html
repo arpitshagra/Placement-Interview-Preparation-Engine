@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}Authenticating — IntervIQ{% endblock %}
+
+{% block content %}
+<div style="max-width: 440px; margin: 4rem auto; text-align: center;">
+  <div class="card" style="padding: 2.5rem 2rem; box-shadow: 0 4px 20px rgba(0,0,0,0.05);">
+    <!-- Animated Spinner / Status Icon -->
+    <div id="statusIcon" style="margin-bottom: 1.5rem;">
+      <svg class="spinner" viewBox="0 0 50 50" style="width: 44px; height: 44px; animation: spin 1s linear infinite; margin: 0 auto; display: block; color: var(--accent);">
+        <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4" stroke-opacity="0.2"></circle>
+        <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="4" stroke-dasharray="80" stroke-dashoffset="60"></circle>
+      </svg>
+    </div>
+
+    <h2 id="statusTitle" style="font-size: 1.25rem; font-weight: 600; margin-bottom: 0.5rem;">Authenticating with Google</h2>
+    <p id="statusDesc" style="font-size: 0.86rem; color: var(--muted); margin-bottom: 1.5rem;">
+      Verifying credentials and syncing your profile...
+    </p>
+
+    <!-- Error container (hidden by default) -->
+    <div id="errorBox" class="flash flash-error hidden" style="text-align: left; margin-bottom: 1.2rem;">
+      <span id="errorMessage">Authentication failed.</span>
+    </div>
+
+    <div id="actionContainer" class="hidden">
+      <a href="{{ url_for('login') }}" class="btn btn-primary btn-full">Return to Login</a>
+    </div>
+  </div>
+</div>
+
+<style>
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  (async function handleCallback() {
+    const statusTitle = document.getElementById("statusTitle");
+    const statusDesc = document.getElementById("statusDesc");
+    const statusIcon = document.getElementById("statusIcon");
+    const errorBox = document.getElementById("errorBox");
+    const errorMessage = document.getElementById("errorMessage");
+    const actionContainer = document.getElementById("actionContainer");
+
+    function showError(msg) {
+      statusIcon.innerHTML = `
+        <div style="width: 44px; height: 44px; border-radius: 50%; background: #fee2e2; color: #dc2626; display: inline-flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: bold;">
+          ✕
+        </div>
+      `;
+      statusTitle.textContent = "Authentication Error";
+      statusDesc.textContent = "We encountered a problem while completing your Google sign-in.";
+      errorMessage.textContent = msg;
+      errorBox.classList.remove("hidden");
+      actionContainer.classList.remove("hidden");
+    }
+
+    try {
+      const sb = await window.getSupabaseClient();
+
+      // Check if hash contains error
+      const hash = window.location.hash.substring(1);
+      const search = window.location.search.substring(1);
+      const urlParams = new URLSearchParams(hash || search);
+
+      const errorDescription = urlParams.get("error_description") || urlParams.get("error");
+      if (errorDescription) {
+        showError(errorDescription.replace(/\+/g, " "));
+        return;
+      }
+
+      // Check for session in Supabase client
+      let session = null;
+      const sessionResult = await sb.auth.getSession();
+      if (sessionResult?.data?.session) {
+        session = sessionResult.data.session;
+      }
+
+      // If not yet resolved, check direct access_token parameter from URL hash
+      if (!session) {
+        const token = urlParams.get("access_token");
+        const refreshToken = urlParams.get("refresh_token");
+        if (token) {
+          if (refreshToken) {
+            const setRes = await sb.auth.setSession({
+              access_token: token,
+              refresh_token: refreshToken
+            }).catch(() => null);
+            session = setRes?.data?.session || { access_token: token };
+          } else {
+            session = { access_token: token };
+          }
+        }
+      }
+
+      // If still not found, wait briefly for onAuthStateChange
+      if (!session) {
+        session = await new Promise((resolve) => {
+          const timeout = setTimeout(() => resolve(null), 3500);
+          const { data: { subscription } } = sb.auth.onAuthStateChange((event, s) => {
+            if (s?.access_token) {
+              clearTimeout(timeout);
+              subscription.unsubscribe();
+              resolve(s);
+            }
+          });
+        });
+      }
+
+      if (!session || !session.access_token) {
+        showError("No valid authentication session or token was returned by Google/Supabase.");
+        return;
+      }
+
+      statusDesc.textContent = "Session verified. Securing your dashboard...";
+
+      // Sync with Flask server session
+      const syncResult = await window.syncServerSession(session.access_token);
+
+      statusIcon.innerHTML = `
+        <div style="width: 44px; height: 44px; border-radius: 50%; background: #dcfce7; color: #16a34a; display: inline-flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: bold;">
+          ✓
+        </div>
+      `;
+      statusTitle.textContent = "Success!";
+      statusDesc.textContent = "Redirecting you now...";
+
+      // Redirect user to dashboard
+      const targetUrl = syncResult.redirect || "/dashboard";
+      setTimeout(() => {
+        window.location.href = targetUrl;
+      }, 500);
+
+    } catch (err) {
+      console.error("[AuthCallback] Error:", err);
+      showError(err.message || "An unexpected error occurred during login.");
+    }
+  })();
+</script>
+{% endblock %}
