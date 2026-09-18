@@ -616,13 +616,23 @@ async function submitUpload() {
 
   try {
     const res  = await fetch("/api/start-from-upload", { method: "POST", body: formData });
-    const data = await res.json();
+    let data;
+    try {
+      data = await res.json();
+    } catch(parseErr) {
+      const errText = await res.text().catch(() => "");
+      stopStepAnimation();
+      $("analysisOverlay").style.display = "none";
+      alert("Server error (" + res.status + "): " + (errText.slice(0, 200) || "Invalid server response"));
+      $("analyseBtn").disabled = false;
+      return;
+    }
 
     stopStepAnimation();
     $("analysisOverlay").style.display = "none";
 
-    if (data.error) {
-      alert("Error: " + data.error);
+    if (!res.ok || (data && data.error)) {
+      alert("Error: " + ((data && data.error) || ("Request failed with status " + res.status)));
       $("analyseBtn").disabled = false;
       return;
     }
@@ -633,10 +643,11 @@ async function submitUpload() {
   } catch(e) {
     stopStepAnimation();
     $("analysisOverlay").style.display = "none";
-    alert("Network error — is the server running?");
+    alert("Request error: " + (e.message || "Failed to reach server"));
     $("analyseBtn").disabled = false;
   }
 }
+
 
 // ── Match Preview ─────────────────────────────────────────────────────────────
 function showMatchPreview(data) {
