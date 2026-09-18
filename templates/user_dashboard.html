@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Placement Preparation Engine{% endblock %}
+{% block content %}
+
+<!-- Header -->
+<div class="row" style="justify-content:space-between;margin-bottom:1.4rem;">
+  <div>
+    <h2 style="font-size:1.15rem;font-weight:700;">Hello, {{ user.name }}</h2>
+    <p class="muted">
+      {{ user.college or 'Engineering Graduate' }}{% if user.college and user.target_company %} · {% endif %}{{ user.target_company or 'Target: Tech Placements' }}
+    </p>
+  </div>
+  <div class="row">
+    <a href="{{ url_for('resume_match_page') }}" class="btn btn-primary">📄 Resume × JD Matcher</a>
+    <a href="{{ url_for('interview_page') }}"   class="btn">+ New Interview</a>
+  </div>
+</div>
+
+<!-- Stats: total, avg score, last interview date -->
+<div class="stats">
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.total or 0 }}</div>
+    <div class="stat-key">Total Practice Sessions</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color: {{ 'var(--green)' if (stats.avg_score or 0) >= 7 else 'var(--amber)' if (stats.avg_score or 0) >= 5 else 'var(--text)' }};">
+      {{ stats.avg_score or '—' }} <span style="font-size:0.85rem;color:var(--muted);font-weight:500;">/ 10</span>
+    </div>
+    <div class="stat-key">Avg Evaluation Score</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.last_interview[:10] if stats.last_interview else '—' }}</div>
+    <div class="stat-key">Latest Practice Date</div>
+  </div>
+</div>
+
+<!-- Profile Card -->
+<div class="card">
+  <span class="lbl">Placement Profile</span>
+  <div class="grid2">
+    <div><span class="muted">Email</span><br><strong>{{ user.email }}</strong></div>
+    <div><span class="muted">Contact Phone</span><br>{{ user.phone or '—' }}</div>
+    <div style="margin-top:.7rem;"><span class="muted">Institution / College</span><br>{{ user.college or '—' }}</div>
+    <div style="margin-top:.7rem;"><span class="muted">Target Role / Company</span><br>{{ user.target_company or '—' }}</div>
+  </div>
+</div>
+
+<!-- Quick Matcher Shortcut Banner -->
+<div class="card" style="background:linear-gradient(135deg,#1c1c1a 0%,#2d2d2b 100%);border:none;color:#fff;">
+  <div class="row" style="justify-content:space-between;align-items:center;">
+    <div>
+      <div style="font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#60a5fa;margin-bottom:.3rem;">PLACEMENT ENGINE</div>
+      <div style="font-size:1.05rem;font-weight:700;">Hybrid Resume × JD Matching & Adaptive Questioning</div>
+      <p style="font-size:.84rem;color:#cbd5e1;margin-top:.3rem;">Extract skills with Pandas, calculate NLP TF-IDF similarity, and auto-generate 5 adaptive topics with explicit justification.</p>
+    </div>
+    <a href="{{ url_for('resume_match_page') }}" class="btn" style="background:#fff;color:#1c1c1a;border:none;font-weight:600;white-space:nowrap;flex-shrink:0;">
+      Launch Matcher →
+    </a>
+  </div>
+</div>
+
+<!-- Interview History with Practice Reports -->
+<div class="card" style="padding:0;">
+  <div style="padding:1.2rem 1.5rem .8rem; display:flex; justify-content:space-between; align-items:center;">
+    <span class="lbl" style="margin:0;">Interview Audit Records ({{ interviews|length }})</span>
+    <span class="muted" style="font-size:0.75rem;">Click a row to expand Q&A logs or open Full Report</span>
+  </div>
+
+  {% if interviews %}
+    {% for iv in interviews %}
+    <div style="border-top:1px solid var(--border);padding:0 1.5rem;">
+
+      <details>
+        <summary>
+          <span>
+            <strong>{{ iv.job_role }}</strong>
+            {% if iv.match_id %}
+              <span class="pill pill-pos" style="font-size:0.6rem;margin-left:0.3rem;">JD Match #{{ iv.match_id }}</span>
+            {% endif %}
+            <span class="muted" style="font-weight:400;margin-left:0.4rem;">
+              · {{ iv.test_type | replace('_', ' ') | capitalize }} · {{ iv.experience | capitalize }} · {{ iv.created_at[:10] }}
+            </span>
+          </span>
+          
+          <div style="display:flex;align-items:center;gap:0.8rem;margin-right:1.2rem;">
+            <a href="{{ url_for('practice_report_page', interview_id=iv.id) }}" class="btn btn-sm btn-primary" style="padding:0.25rem 0.65rem;font-size:0.74rem;" onclick="event.stopPropagation();">
+              📊 View Report
+            </a>
+            <span style="color:var(--text);font-weight:700;font-size:.92rem;">
+              {{ iv.avg_score or '—' }}/10
+            </span>
+          </div>
+        </summary>
+
+        <!-- Expanded: show every Q&A pair with AI analysis -->
+        <div style="padding-bottom:1.2rem;">
+          <div style="margin-top:0.4rem;margin-bottom:0.8rem;display:flex;gap:0.5rem;align-items:center;">
+            <a href="{{ url_for('practice_report_page', interview_id=iv.id) }}" class="btn btn-sm" style="font-size:0.75rem;">
+              📄 Open Full Auditable Practice Report →
+            </a>
+          </div>
+
+          {% for h in iv.history %}{% if h.answer %}
+          <div style="margin-top:.8rem;padding:.9rem;background:var(--bg);border-radius:6px;">
+
+            <!-- Question & Topic -->
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem;margin-bottom:.35rem;">
+              <p style="font-size:.84rem;font-weight:600;">
+                Q{{ loop.index }}: {{ h.question }}
+              </p>
+              {% if h.is_followup %}
+                <span class="pill pill-hard" style="font-size:0.6rem;">Follow-up Probe</span>
+              {% endif %}
+            </div>
+
+            <!-- Your answer -->
+            <p style="font-size:.82rem;color:var(--muted);font-style:italic;margin-bottom:.5rem;">"{{ h.answer }}"</p>
+
+            <!-- AI analysis badges -->
+            {% if h.analysis %}
+            <div class="row">
+              <span class="pill pill-{{ 'pos' if (h.analysis.quality_score or 5) >= 7 else 'neu' if (h.analysis.quality_score or 5) >= 5 else 'neg' }}">
+                Score: <strong>{{ h.analysis.quality_score or 5 }}/10</strong>
+              </span>
+
+              {% if h.analysis.technical_accuracy %}
+                <span style="font-size:.74rem;color:var(--muted);">Tech: <strong>{{ h.analysis.technical_accuracy }}/10</strong></span>
+                <span style="font-size:.74rem;color:var(--muted);">Problem Solving: <strong>{{ h.analysis.problem_solving }}/10</strong></span>
+              {% endif %}
+
+              {% if h.analysis.plagiarism_risk == 'high' %}
+                <span class="pill pill-neg">⚠ plagiarism: high</span>
+              {% elif h.analysis.plagiarism_risk == 'medium' %}
+                <span class="pill pill-neu">⚠ plagiarism: medium</span>
+              {% endif %}
+            </div>
+            {% endif %}
+
+          </div>
+          {% endif %}{% endfor %}
+        </div>
+
+      </details>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted" style="padding:1.4rem 1.5rem;">No interview practice sessions recorded yet. Run the Matcher or start an interview!</p>
+  {% endif %}
+</div>
+
+{% endblock %}

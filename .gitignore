@@ -1,0 +1,8 @@
+API_KEY.env
+.env
+responses/
+uploads/
+__pycache__/
+*.db
+node_modules/
+.DS_Store

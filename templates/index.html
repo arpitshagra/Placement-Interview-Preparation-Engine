@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Interview Bot</title>
+<style>
+  :root {
+    --bg:     #f7f7f6;
+    --white:  #ffffff;
+    --border: #e4e4e2;
+    --text:   #1c1c1a;
+    --muted:  #8a8a86;
+    --accent: #1c1c1a;
+    --green:  #1a7f37;
+    --red:    #cf222e;
+    --amber:  #9a6700;
+    --r:      9px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2.5rem 1rem 5rem;
+  }
+
+  .wrap { width: 100%; max-width: 580px; }
+
+  header { margin-bottom: 2rem; }
+  header h1 { font-size: 1.1rem; font-weight: 600; }
+  header p  { font-size: .8rem; color: var(--muted); margin-top: .15rem; }
+
+  .card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 1.5rem;
+    margin-bottom: .85rem;
+  }
+
+  .lbl {
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: .65rem;
+    display: block;
+  }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .65rem; }
+  @media(max-width:420px){ .grid2 { grid-template-columns: 1fr; } }
+
+  .field label { font-size: .76rem; color: var(--muted); display: block; margin-bottom: .28rem; }
+  select, input[type=text] {
+    width: 100%; padding: .55rem .7rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text);
+    font-size: .86rem; font-family: inherit;
+    outline: none; transition: border-color .15s;
+  }
+  select:focus, input:focus { border-color: #999; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
+    padding: .6rem 1.3rem; border: 1px solid var(--border); border-radius: 6px;
+    font-size: .84rem; font-family: inherit; font-weight: 500;
+    cursor: pointer; background: var(--white); color: var(--text);
+    transition: background .15s; white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) { background: var(--bg); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover:not(:disabled) { background: #333; border-color: #333; }
+  .btn-sm { padding: .38rem .8rem; font-size: .76rem; }
+  .btn-rec { border-color: var(--red); color: var(--red); }
+
+  /* Progress */
+  .prog-row { display: flex; align-items: center; gap: .7rem; margin-bottom: .85rem; }
+  .bar { flex: 1; height: 2px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s; width: 0; }
+  .prog-txt { font-size: .73rem; color: var(--muted); white-space: nowrap; }
+
+  .pill {
+    font-size: .63rem; font-weight: 600; letter-spacing: .05em;
+    text-transform: uppercase; padding: .18rem .55rem;
+    border-radius: 99px; border: 1px solid;
+  }
+  .pill-easy   { color: var(--green); border-color: var(--green); }
+  .pill-medium { color: var(--amber); border-color: var(--amber); }
+  .pill-hard   { color: var(--red);   border-color: var(--red);   }
+
+  #questionText { font-size: .97rem; line-height: 1.65; min-height: 2.5rem; }
+  #statusLine   { font-size: .76rem; color: var(--muted); margin-top: .5rem; min-height: 1rem; }
+
+  /* Mic section */
+  .mic-area { text-align: center; padding: .8rem 0 .4rem; }
+  .mic-ring {
+    width: 62px; height: 62px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--white);
+    font-size: 1.45rem; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .mic-ring:hover { border-color: #aaa; }
+  .mic-ring.listening {
+    border-color: var(--red);
+    box-shadow: 0 0 0 5px rgba(207,34,46,.1);
+    animation: pulse 1.3s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 5px rgba(207,34,46,.1); }
+    50%      { box-shadow: 0 0 0 12px rgba(207,34,46,.02); }
+  }
+  .mic-hint { font-size: .74rem; color: var(--muted); margin-top: .45rem; }
+
+  .divider { border: none; border-top: 1px solid var(--border); margin: .8rem 0; }
+
+  .text-row { display: flex; gap: .5rem; margin-top: .9rem; }
+  .text-row input { flex: 1; }
+
+  #loader { font-size: .78rem; color: var(--muted); margin-top: .7rem; display: none; }
+  .dots { display: inline-flex; gap: 3px; vertical-align: middle; margin-right: 4px; }
+  .dots span {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--muted);
+    animation: db .9s ease-in-out infinite;
+  }
+  .dots span:nth-child(2) { animation-delay:.15s; }
+  .dots span:nth-child(3) { animation-delay:.3s;  }
+  @keyframes db { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
+
+  #transcriptBox { font-size: .81rem; color: var(--muted); font-style: italic; line-height: 1.55; min-height: 1rem; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .65rem; }
+  .chip {
+    font-size: .68rem; font-weight: 500; padding: .18rem .55rem;
+    border-radius: 99px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--muted);
+  }
+  .chip.pos { color: var(--green); border-color: var(--green); background: #f0fff4; }
+  .chip.neg { color: var(--red);   border-color: var(--red);   background: #fff5f5; }
+  .chip.neu { color: var(--amber); border-color: var(--amber); background: #fffbea; }
+
+  .score-big { font-size: 2rem; font-weight: 700; line-height: 1; }
+  .score-sub { font-size: .78rem; color: var(--muted); margin-left: .2rem; }
+  #feedbackText { font-size: .88rem; line-height: 1.7; margin-top: .9rem; }
+
+  .hidden { display: none !important; }
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1.1rem; }
+
+  /* Info banner */
+  .info-box {
+    background: #fffbea;
+    border: 1px solid #e6d072;
+    border-radius: 6px;
+    padding: .65rem .9rem;
+    font-size: .78rem;
+    color: #7a5900;
+    margin-bottom: .85rem;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Interview Bot</h1>
+    <p>AI-powered · adaptive · voice-first</p>
+  </header>
+
+  <!-- ══ SETUP ══ -->
+  <div id="setupScreen">
+    <div class="info-box">
+      🎙 This bot uses your <strong>system microphone</strong> directly — no browser permissions needed.
+      Make sure your mic is connected and working before starting.
+    </div>
+
+    <div class="card">
+      <span class="lbl">Configure your interview</span>
+      <div style="display:grid;gap:.65rem;">
+
+        <div class="field">
+          <label>Job Role</label>
+          <input type="text" id="jobRole" placeholder="e.g. Backend Engineer, Data Scientist" value="Software Engineer"/>
+        </div>
+
+        <div class="grid2">
+          <div class="field">
+            <label>Experience Level</label>
+            <select id="experience">
+              <option value="junior">Junior  (0–2 yrs)</option>
+              <option value="mid" selected>Mid  (2–5 yrs)</option>
+              <option value="senior">Senior  (5+ yrs)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Test Type</label>
+            <select id="testType">
+              <option value="technical">Technical</option>
+              <option value="hr">HR / Behavioural</option>
+              <option value="mixed" selected>Mixed</option>
+              <option value="system design">System Design</option>
+              <option value="data structures">DSA</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Number of Questions</label>
+          <select id="totalQ">
+            <option value="4">4 questions</option>
+            <option value="6" selected>6 questions</option>
+            <option value="8">8 questions</option>
+            <option value="10">10 questions</option>
+          </select>
+        </div>
+
+      </div>
+    </div>
+
+    <button class="btn btn-primary" id="startBtn" onclick="startInterview()">
+      Start Interview
+    </button>
+  </div>
+
+  <!-- ══ INTERVIEW ══ -->
+  <div id="interviewScreen" class="hidden">
+
+    <div class="prog-row">
+      <span class="prog-txt" id="progTxt">1 / 6</span>
+      <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+      <span class="pill pill-medium" id="diffPill">Medium</span>
+    </div>
+
+    <!-- Question -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;">
+        <div style="flex:1">
+          <span class="lbl">Question</span>
+          <div id="questionText">Loading…</div>
+        </div>
+        <button class="btn btn-sm" onclick="replayAudio()">↺</button>
+      </div>
+      <div id="statusLine"></div>
+    </div>
+
+    <!-- Answer -->
+    <div class="card">
+      <span class="lbl">Your Answer</span>
+
+      <div class="mic-area">
+        <button class="mic-ring" id="micBtn" onclick="handleMic()">🎙</button>
+        <div class="mic-hint" id="micHint">Click to speak — mic opens on your computer</div>
+      </div>
+
+      <div class="text-row">
+        <input type="text" id="textIn" placeholder="Or type your answer and press Enter"/>
+        <button class="btn" onclick="submitTyped()">Send</button>
+      </div>
+
+      <div id="loader">
+        <span class="dots"><span></span><span></span><span></span></span>Analysing…
+      </div>
+
+      <div id="analysisSection" class="hidden">
+        <hr class="divider"/>
+        <div id="transcriptBox"></div>
+        <div class="chips" id="chips"></div>
+      </div>
+    </div>
+
+  </div><!-- /interviewScreen -->
+
+  <!-- ══ FEEDBACK ══ -->
+  <div id="feedbackScreen" class="hidden">
+    <div class="card">
+      <span class="lbl">Interview Complete</span>
+      <div>
+        <span class="score-big" id="finalScore">—</span>
+        <span class="score-sub">/ 10 avg</span>
+      </div>
+      <div id="feedbackText"></div>
+      <div class="row">
+        <button class="btn btn-sm" onclick="replayAudio()">↺ Replay</button>
+        <button class="btn btn-sm btn-primary" onclick="location.reload()">New Interview</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<audio id="botAudio"></audio>
+
+<script>
+let sessionId    = null;
+let currentAudio = null;
+let busy         = false;   // prevent double-clicks
+
+const $ = id => document.getElementById(id);
+
+/* ── Audio ─────────────────────────────────────────────── */
+function playAudio(url) {
+  currentAudio = url;
+  const a = $("botAudio");
+  a.src = url;
+  setStatus("Speaking…");
+  a.onended = () => setStatus("");
+  a.onerror = () => setStatus("");
+  a.play().catch(() => setStatus(""));
+}
+function replayAudio() { if (currentAudio) playAudio(currentAudio); }
+function setStatus(msg) { $("statusLine").textContent = msg; }
+
+/* ── Progress ──────────────────────────────────────────── */
+function setProgress(num, total, diff) {
+  $("progTxt").textContent = `${num} / ${total}`;
+  $("barFill").style.width = `${(num / total) * 100}%`;
+  const p = $("diffPill");
+  p.className    = `pill pill-${diff}`;
+  p.textContent  = diff[0].toUpperCase() + diff.slice(1);
+}
+
+/* ── Start ─────────────────────────────────────────────── */
+async function startInterview() {
+  const role = $("jobRole").value.trim();
+  if (!role) { alert("Please enter a job role."); return; }
+  $("startBtn").disabled = true;
+  $("startBtn").textContent = "Starting…";
+
+  try {
+    const res  = await fetch("/start", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        job_role:   role,
+        experience: $("experience").value,
+        test_type:  $("testType").value,
+        total_q:    $("totalQ").value,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) { alert(data.error); $("startBtn").disabled = false; $("startBtn").textContent = "Start Interview"; return; }
+
+    sessionId = data.session_id;
+    $("setupScreen").classList.add("hidden");
+    $("interviewScreen").classList.remove("hidden");
+    $("questionText").textContent = data.question;
+    setProgress(1, data.total_q, data.difficulty);
+    playAudio(data.audio_url);
+  } catch(e) {
+    alert("Cannot connect. Is app.py running?");
+    $("startBtn").disabled = false;
+    $("startBtn").textContent = "Start Interview";
+  }
+}
+
+/* ── Mic (calls server-side recording) ─────────────────── */
+async function handleMic() {
+  if (busy) return;
+  busy = true;
+
+  const btn  = $("micBtn");
+  const hint = $("micHint");
+
+  btn.classList.add("listening");
+  btn.textContent  = "⏹";
+  hint.textContent = "Listening on your computer mic… speak now, then wait for silence";
+  setStatus("Recording…");
+  $("botAudio").pause();
+
+  try {
+    // This call BLOCKS until the user finishes speaking (server-side)
+    const res  = await fetch("/record", {
+      method:  "POST",
+      headers: {"Content-Type":"application/json"},
+      body:    JSON.stringify({ session_id: sessionId }),
+    });
+    const data = await res.json();
+
+    btn.classList.remove("listening");
+    btn.textContent  = "🎙";
+
+    if (data.error) {
+      hint.textContent = data.error;
+      setStatus("");
+      busy = false;
+      return;
+    }
+
+    hint.textContent = "Processing…";
+    await submitAnswer(data.transcription);
+  } catch(e) {
+    btn.classList.remove("listening");
+    btn.textContent  = "🎙";
+    hint.textContent = "Error — try again or type your answer below";
+    setStatus("");
+    busy = false;
+  }
+}
+
+/* ── Text input ────────────────────────────────────────── */
+async function submitTyped() {
+  const text = $("textIn").value.trim();
+  if (!text || busy) return;
+  $("textIn").value = "";
+  busy = true;
+  await submitAnswer(text);
+}
+$("textIn").addEventListener("keypress", e => { if (e.key === "Enter") submitTyped(); });
+
+/* ── Submit answer to AI ───────────────────────────────── */
+async function submitAnswer(text) {
+  $("loader").style.display = "block";
+  $("micBtn").disabled      = true;
+  setStatus("Analysing…");
+
+  try {
+    const res  = await fetch("/answer", {
+      method:  "POST",
+      headers: {"Content-Type":"application/json"},
+      body:    JSON.stringify({ session_id: sessionId, text }),
+    });
+    const data = await res.json();
+    $("loader").style.display = "none";
+
+    if (data.error) { alert(data.error); resetUI(); return; }
+
+    // Show transcript + chips
+    $("analysisSection").classList.remove("hidden");
+    $("transcriptBox").textContent = `"${data.transcription}"`;
+    renderChips(data.analysis);
+
+    if (data.finished) {
+      showFeedback(data);
+    } else {
+      $("questionText").textContent = data.next_question;
+      setProgress(data.question_num, data.total_q, data.difficulty);
+      playAudio(data.audio_url);
+      resetUI();
+    }
+  } catch(e) {
+    $("loader").style.display = "none";
+    alert("Network error. Is Flask running?");
+    resetUI();
+  }
+}
+
+function resetUI() {
+  $("micBtn").disabled     = false;
+  $("micHint").textContent = "Click to speak — mic opens on your computer";
+  setStatus("");
+  busy = false;
+}
+
+/* ── Chips ─────────────────────────────────────────────── */
+function renderChips(a) {
+  if (!a) return;
+  const cls = {
+    positive:"pos", negative:"neg", neutral:"neu",
+    confident:"pos", nervous:"neg", confused:"neg", enthusiastic:"pos", unsure:"neu",
+    low:"pos", medium:"neu", high:"neg",
+  };
+  const items = [
+    { label: a.sentiment,   key: a.sentiment },
+    { label: a.emotion,     key: a.emotion   },
+    { label: `score: ${a.quality_score}/10`,
+      key: a.quality_score >= 7 ? "positive" : a.quality_score >= 5 ? "neutral" : "negative" },
+    { label: `plagiarism: ${a.plagiarism_risk}`, key: a.plagiarism_risk },
+  ];
+  $("chips").innerHTML = items
+    .map(i => `<span class="chip ${cls[i.key]||''}">${i.label}</span>`)
+    .join("");
+}
+
+/* ── Feedback ──────────────────────────────────────────── */
+function showFeedback(data) {
+  $("interviewScreen").classList.add("hidden");
+  $("feedbackScreen").classList.remove("hidden");
+  const target = parseFloat(data.avg_score) || 0;
+  let cur = 0;
+  const el = $("finalScore");
+  const t  = setInterval(() => {
+    cur = Math.min(cur + .2, target);
+    el.textContent = cur.toFixed(1);
+    if (cur >= target) clearInterval(t);
+  }, 30);
+  $("feedbackText").textContent = data.feedback;
+  playAudio(data.audio_url);
+}
+</script>
+</body>
+</html>

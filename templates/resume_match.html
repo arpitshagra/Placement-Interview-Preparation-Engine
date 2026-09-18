@@ -1,0 +1,844 @@
+{% extends "base.html" %}
+{% block title %}Resume Matcher — IntervIQ{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* ── Page layout ────────────────────────────────────────────────────────── */
+  .rm-header { margin-bottom: 1.6rem; }
+  .rm-header h2 { font-size: 1.05rem; font-weight: 600; margin-bottom: .25rem; }
+
+  /* ── Steps indicator ────────────────────────────────────────────────────── */
+  .steps {
+    display: flex; gap: 0; margin-bottom: 1.8rem;
+    border: 1px solid var(--border); border-radius: var(--r); overflow: hidden;
+  }
+  .step {
+    flex: 1; padding: .6rem 1rem; font-size: .75rem; font-weight: 600;
+    letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+    background: var(--white); border-right: 1px solid var(--border);
+    display: flex; align-items: center; gap: .4rem; transition: all .2s;
+  }
+  .step:last-child { border-right: none; }
+  .step.done   { color: var(--green); background: #f0fff4; }
+  .step.active { color: var(--text);  background: var(--bg); }
+  .step .dot {
+    width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid currentColor;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .62rem; flex-shrink: 0;
+  }
+  .step.done .dot { background: var(--green); border-color: var(--green); color: #fff; }
+
+  /* ── Section heading ─────────────────────────────────────────────────────── */
+  .section-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: .9rem;
+  }
+  .section-head h3 { font-size: .9rem; font-weight: 600; }
+
+  /* ── Upload zone ─────────────────────────────────────────────────────────── */
+  .upload-zone {
+    border: 2px dashed var(--border); border-radius: var(--r);
+    padding: 2rem 1rem; text-align: center; cursor: pointer;
+    transition: border-color .2s, background .2s;
+    position: relative;
+  }
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: #999; background: var(--bg);
+  }
+  .upload-zone input[type=file] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer;
+    width: 100%; height: 100%;
+  }
+  .upload-zone .uz-icon { font-size: 2rem; margin-bottom: .5rem; }
+  .upload-zone .uz-label { font-size: .84rem; font-weight: 500; }
+  .upload-zone .uz-sub   { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
+
+  /* ── Skills / pills grid ────────────────────────────────────────────────── */
+  .pill-grid { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .5rem; }
+  .pill-green  { color: var(--green); border-color: var(--green); }
+  .pill-red    { color: var(--red);   border-color: var(--red);   }
+  .pill-blue   { color: #0969da;      border-color: #0969da;      }
+  .pill-purple { color: #8250df;      border-color: #8250df;      }
+
+  /* ── Analysis panel ─────────────────────────────────────────────────────── */
+  .analysis-panel {
+    margin-top: 1rem; padding: 1rem; background: var(--bg);
+    border-radius: var(--r); border: 1px solid var(--border);
+  }
+  .analysis-panel .ap-section { margin-bottom: .85rem; }
+  .analysis-panel .ap-section:last-child { margin-bottom: 0; }
+  .analysis-panel .ap-title {
+    font-size: .68rem; font-weight: 700; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: .4rem;
+  }
+
+  /* ── Match score ring ────────────────────────────────────────────────────── */
+  .score-ring-wrap {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 1.5rem 0;
+  }
+  .score-ring { position: relative; width: 130px; height: 130px; }
+  .score-ring svg { transform: rotate(-90deg); }
+  .score-ring .score-text {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .score-val { font-size: 2rem; font-weight: 700; line-height: 1; }
+  .score-lbl { font-size: .65rem; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+  .score-desc { font-size: .8rem; color: var(--muted); margin-top: .6rem; }
+
+  /* ── Match grid ─────────────────────────────────────────────────────────── */
+  .match-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+  @media(max-width:560px){ .match-grid { grid-template-columns: 1fr; } }
+
+  /* ── Improvement cards ───────────────────────────────────────────────────── */
+  .imp-card {
+    padding: .85rem 1rem; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 7px;
+    margin-bottom: .5rem;
+  }
+  .imp-card .imp-area { font-size: .8rem; font-weight: 600; margin-bottom: .3rem; }
+  .imp-card .imp-sug  { font-size: .8rem; color: var(--muted); line-height: 1.5; }
+
+  /* ── History table ───────────────────────────────────────────────────────── */
+  .score-bar {
+    height: 6px; border-radius: 99px; background: var(--border);
+    overflow: hidden; width: 80px; display: inline-block; vertical-align: middle;
+    margin-left: .4rem;
+  }
+  .score-bar-fill { height: 100%; border-radius: 99px; background: var(--green); }
+
+  /* ── Loading spinner ─────────────────────────────────────────────────────── */
+  .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid var(--border); border-top-color: var(--text);
+    border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Previous resume selector ────────────────────────────────────────────── */
+  .prev-list { display: flex; flex-direction: column; gap: .4rem; margin-top: .6rem; }
+  .prev-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: .5rem .75rem; border: 1px solid var(--border); border-radius: 6px;
+    font-size: .82rem; background: var(--white); cursor: pointer;
+    transition: background .15s;
+  }
+  .prev-item:hover { background: var(--bg); }
+  .prev-item.selected { border-color: var(--text); background: var(--bg); }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Page Header -->
+<div class="rm-header">
+  <h2>Resume × Job Description Matcher</h2>
+  <p class="muted">Upload your resume, add a JD, and get an AI-powered match score with skill gap analysis.</p>
+</div>
+
+<!-- Step Indicator -->
+<div class="steps">
+  <div class="step" id="step1Indicator">
+    <div class="dot" id="step1Dot">1</div>
+    Resume
+  </div>
+  <div class="step" id="step2Indicator">
+    <div class="dot" id="step2Dot">2</div>
+    Job Description
+  </div>
+  <div class="step" id="step3Indicator">
+    <div class="dot" id="step3Dot">3</div>
+    Match Results
+  </div>
+</div>
+
+<!-- ── STEP 1: RESUME ─────────────────────────────────────────────────────── -->
+<div class="card" id="resumeCard">
+  <div class="section-head">
+    <h3>📄 Resume Upload</h3>
+    <span id="resumeStatus" class="muted" style="font-size:.78rem;"></span>
+  </div>
+
+  <!-- Upload Zone -->
+  <div class="upload-zone" id="uploadZone">
+    <input type="file" id="resumeFile" accept=".pdf,.docx" onchange="handleResumeFile(this)">
+    <div class="uz-icon">📎</div>
+    <div class="uz-label">Drop your resume here or click to browse</div>
+    <div class="uz-sub">Supports PDF and DOCX · Max 5 MB</div>
+  </div>
+
+  <!-- Upload progress & result -->
+  <div id="resumeLoading" class="hidden" style="margin-top:.8rem;font-size:.83rem;color:var(--muted);">
+    <span class="spinner"></span>&nbsp; Parsing and analysing your resume…
+  </div>
+
+  <!-- Analysis panel (shown after upload) -->
+  <div id="resumeAnalysis" class="analysis-panel hidden">
+    <div class="ap-section">
+      <div class="ap-title">Summary</div>
+      <p id="resumeSummary" style="font-size:.83rem;line-height:1.6;"></p>
+    </div>
+    <div class="ap-section">
+      <div class="ap-title">Skills Detected</div>
+      <div class="pill-grid" id="resumeSkills"></div>
+    </div>
+    <div class="ap-section">
+      <div class="ap-title">Strengths</div>
+      <div class="pill-grid" id="resumeStrengths"></div>
+    </div>
+    <div class="ap-section">
+      <div class="ap-title">Areas to Improve</div>
+      <div class="pill-grid" id="resumeWeaknesses"></div>
+    </div>
+    <details style="margin-top:.6rem;">
+      <summary style="font-size:.8rem;">Education, Experience & Projects</summary>
+      <div style="margin-top:.6rem;">
+        <div class="ap-title">Education</div>
+        <div id="resumeEducation" style="font-size:.82rem;line-height:1.7;"></div>
+        <div class="ap-title" style="margin-top:.6rem;">Experience</div>
+        <div id="resumeExperience" style="font-size:.82rem;line-height:1.7;"></div>
+        <div class="ap-title" style="margin-top:.6rem;">Projects</div>
+        <div id="resumeProjects" style="font-size:.82rem;line-height:1.7;"></div>
+      </div>
+    </details>
+  </div>
+
+  <!-- Previous resumes -->
+  {% if resumes %}
+  <details style="margin-top:.8rem;">
+    <summary style="font-size:.8rem;">Use a previously uploaded resume ({{ resumes|length }})</summary>
+    <div class="prev-list" id="prevResumeList">
+      {% for r in resumes %}
+      <div class="prev-item" onclick="loadExistingResume({{ r.id }}, this)">
+        <span>{{ r.filename }} <span class="muted">({{ r.file_type.upper() }})</span></span>
+        <span class="muted">{{ r.created_at[:10] }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+</div>
+
+<!-- ── STEP 2: JOB DESCRIPTION ────────────────────────────────────────────── -->
+<div class="card" id="jdCard">
+  <div class="section-head">
+    <h3>📋 Job Description</h3>
+    <span id="jdStatus" class="muted" style="font-size:.78rem;"></span>
+  </div>
+
+  <div class="field">
+    <label>Paste the full job description</label>
+    <textarea id="jdText" rows="8"
+      placeholder="Paste the job description here — include required skills, responsibilities, qualifications…"></textarea>
+  </div>
+
+  <div class="row" style="justify-content:space-between;align-items:center;margin-top:-.2rem;">
+    <span class="muted" style="font-size:.76rem;">Or upload a PDF / DOCX of the JD:</span>
+    <div class="row" style="gap:.5rem;">
+      <label class="btn btn-sm" style="cursor:pointer;">
+        Upload JD File
+        <input type="file" id="jdFile" accept=".pdf,.docx"
+               onchange="handleJdFile(this)" style="display:none;">
+      </label>
+      <button class="btn btn-primary btn-sm" onclick="analyzeJd()">Analyse JD →</button>
+    </div>
+  </div>
+
+  <!-- JD Loading -->
+  <div id="jdLoading" class="hidden" style="margin-top:.8rem;font-size:.83rem;color:var(--muted);">
+    <span class="spinner"></span>&nbsp; Extracting JD requirements…
+  </div>
+
+  <!-- JD Analysis -->
+  <div id="jdAnalysis" class="analysis-panel hidden">
+    <div class="ap-section">
+      <div class="ap-title">Role</div>
+      <p id="jdRole" style="font-size:.88rem;font-weight:600;"></p>
+    </div>
+    <div class="ap-section">
+      <div class="ap-title">Experience Required</div>
+      <p id="jdExp" style="font-size:.83rem;"></p>
+    </div>
+    <div class="ap-section">
+      <div class="ap-title">Required Skills</div>
+      <div class="pill-grid" id="jdRequired"></div>
+    </div>
+    <div class="ap-section">
+      <div class="ap-title">Preferred Skills</div>
+      <div class="pill-grid" id="jdPreferred"></div>
+    </div>
+  </div>
+
+  <!-- Previous JDs -->
+  {% if jds %}
+  <details style="margin-top:.8rem;">
+    <summary style="font-size:.8rem;">Use a previous job description ({{ jds|length }})</summary>
+    <div class="prev-list">
+      {% for j in jds %}
+      <div class="prev-item" onclick="loadExistingJd({{ j.id }}, this)">
+        <span>{{ j.role or 'Untitled Role' }}</span>
+        <span class="muted">{{ j.created_at[:10] }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+</div>
+
+<!-- ── STEP 3: MATCH ───────────────────────────────────────────────────────── -->
+<div class="card" id="matchCard">
+  <div class="section-head">
+    <h3>🎯 Match Engine</h3>
+    <button class="btn btn-primary" id="runMatchBtn" onclick="runMatch()" disabled>
+      Run Match Analysis
+    </button>
+  </div>
+
+  <p class="muted" id="matchHint" style="font-size:.82rem;">
+    Complete steps 1 and 2 to enable the match engine.
+  </p>
+
+  <!-- Match Loading -->
+  <div id="matchLoading" class="hidden" style="font-size:.83rem;color:var(--muted);margin-top:.5rem;">
+    <span class="spinner"></span>&nbsp; Comparing resume against job description…
+  </div>
+
+    <!-- Score & Analytics Metrics -->
+    <div class="score-ring-wrap">
+      <div class="score-ring">
+        <svg width="130" height="130" viewBox="0 0 130 130">
+          <circle cx="65" cy="65" r="56" fill="none" stroke="var(--border)" stroke-width="10"/>
+          <circle id="scoreCircle" cx="65" cy="65" r="56" fill="none"
+                  stroke="var(--green)" stroke-width="10"
+                  stroke-dasharray="351.9" stroke-dashoffset="351.9"
+                  stroke-linecap="round" style="transition:stroke-dashoffset 1s ease;"/>
+        </svg>
+        <div class="score-text">
+          <div class="score-val" id="scoreVal">0%</div>
+          <div class="score-lbl">Match</div>
+        </div>
+      </div>
+      <div class="score-desc" id="scoreDesc"></div>
+
+      <!-- NLP & Pandas Analytics Sub-Metrics -->
+      <div class="row" style="gap:1rem;margin-top:1.2rem;justify-content:center;flex-wrap:wrap;">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.5rem .8rem;text-align:center;">
+          <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;font-weight:700;">TF-IDF Text Similarity</div>
+          <div id="tfidfScoreVal" style="font-size:1.1rem;font-weight:700;color:var(--text);margin-top:.1rem;">0%</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.5rem .8rem;text-align:center;">
+          <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;font-weight:700;">Must-Have Skills Match</div>
+          <div id="mustHaveRateVal" style="font-size:1.1rem;font-weight:700;color:var(--green);margin-top:.1rem;">0%</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.5rem .8rem;text-align:center;">
+          <div style="font-size:.68rem;color:var(--muted);text-transform:uppercase;font-weight:700;">Preferred Skills Match</div>
+          <div id="preferredRateVal" style="font-size:1.1rem;font-weight:700;color:#0969da;margin-top:.1rem;">0%</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── ADAPTIVE INTERVIEW BLUEPRINT (TOPICS & EVIDENCE) ────────────────── -->
+    <div style="margin-top:1.5rem;padding:1.2rem;background:#f6f8fa;border:1px solid #d0d7de;border-radius:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem;">
+        <div>
+          <h4 style="font-size:.92rem;font-weight:700;margin:0 0 .2rem;">🎯 Adaptive Interview Blueprint</h4>
+          <span class="muted" style="font-size:.76rem;">5 focused interview topics selected with verifiable evidence from resume claims & JD requirements</span>
+        </div>
+        <a id="launchInterviewBtnTop" href="#" class="btn btn-primary btn-sm" style="display:none;background:#1f883d;">
+          🚀 Start Adaptive Interview
+        </a>
+      </div>
+      <div id="topicsEvidenceList" style="display:flex;flex-direction:column;gap:.6rem;"></div>
+    </div>
+
+    <!-- Skills grid -->
+    <div class="match-grid" style="margin-top:1.5rem;">
+      <div>
+        <div class="lbl">✅ Matched Skills</div>
+        <div class="pill-grid" id="matchedSkills"></div>
+      </div>
+      <div>
+        <div class="lbl">❌ Missing Skills (Must-Have)</div>
+        <div class="pill-grid" id="missingSkills"></div>
+      </div>
+    </div>
+
+    <!-- Category Breakdown -->
+    <div id="categoryBreakdownWrap" style="margin-top:1.2rem;" class="hidden">
+      <div class="lbl">📊 Skill Category Breakdown (Pandas Analytics)</div>
+      <div id="categoryBreakdownList" style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.4rem;"></div>
+    </div>
+
+    <!-- Improvement Areas -->
+    <div style="margin-top:1.2rem;">
+      <div class="lbl">💡 ATS Profile Recommendations</div>
+      <div id="improvementAreas"></div>
+    </div>
+
+    <!-- Primary Launch Action -->
+    <div style="margin-top:1.6rem;padding:1.2rem;background:#f0fff4;border:1.5px solid var(--green);border-radius:8px;text-align:center;">
+      <h4 style="margin:0 0 .4rem;font-size:1rem;color:#1a7f37;">Ready to test your knowledge?</h4>
+      <p class="muted" style="font-size:.82rem;margin-bottom:.9rem;">
+        Take a short adaptive voice/text interview tailored specifically to these 5 evidence-backed topics.
+      </p>
+      <a id="launchInterviewBtn" href="#" class="btn btn-primary" style="padding:.6rem 1.6rem;font-size:.9rem;background:#1f883d;">
+        🚀 Launch Adaptive Technical Interview
+      </a>
+    </div>
+
+    <!-- Actions -->
+    <div class="row" style="margin-top:1.2rem;justify-content:flex-end;">
+      <button class="btn btn-sm" onclick="runMatch()">Re-run Analysis</button>
+      <a href="{{ url_for('resume_match_page') }}" class="btn btn-sm">Start Fresh</a>
+    </div>
+  </div>
+</div>
+
+
+<!-- ── MATCH HISTORY ───────────────────────────────────────────────────────── -->
+{% if matches %}
+<div class="card" style="padding:0;">
+  <div style="padding:1.2rem 1.5rem .6rem;">
+    <span class="lbl" style="margin:0;">Match History ({{ matches|length }})</span>
+  </div>
+  {% for m in matches %}
+  <div style="border-top:1px solid var(--border);padding:0 1.5rem;">
+    <details>
+      <summary>
+        <span>
+          <strong>{{ m.resume_filename }}</strong>
+          <span class="muted"> vs </span>
+          <strong>{{ m.jd_role or 'Unknown Role' }}</strong>
+          <span class="muted" style="font-weight:400;"> · {{ m.created_at[:10] }}</span>
+        </span>
+        <span style="display:flex;align-items:center;gap:.5rem;margin-right:1.5rem;">
+          <span class="score-bar">
+            <span class="score-bar-fill" style="width:{{ m.match_score }}%;background:{{ '#1a7f37' if m.match_score >= 70 else '#9a6700' if m.match_score >= 40 else '#cf222e' }};"></span>
+          </span>
+          <strong style="font-size:.9rem;">{{ m.match_score | int }}%</strong>
+        </span>
+      </summary>
+      <div style="padding-bottom:1rem;">
+        <div class="grid2" style="margin-top:.6rem;">
+          <div>
+            <div class="ap-title">Matched Skills</div>
+            <div class="pill-grid">
+              {% for s in m.matched_skills[:8] %}<span class="pill pill-green">{{ s }}</span>{% endfor %}
+              {% if m.matched_skills|length > 8 %}<span class="muted" style="font-size:.75rem;">+{{ m.matched_skills|length - 8 }} more</span>{% endif %}
+            </div>
+          </div>
+          <div>
+            <div class="ap-title">Missing Skills</div>
+            <div class="pill-grid">
+              {% for s in m.missing_skills[:8] %}<span class="pill pill-red">{{ s }}</span>{% endfor %}
+              {% if m.missing_skills|length > 8 %}<span class="muted" style="font-size:.75rem;">+{{ m.missing_skills|length - 8 }} more</span>{% endif %}
+            </div>
+          </div>
+        </div>
+        {% if m.improvement_areas %}
+        <div style="margin-top:.8rem;">
+          <div class="ap-title">Improvement Areas</div>
+          {% for ia in m.improvement_areas %}
+          <div class="imp-card">
+            <div class="imp-area">{{ ia.area if ia is mapping else ia }}</div>
+            {% if ia is mapping and ia.suggestion %}
+            <div class="imp-sug">{{ ia.suggestion }}</div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+    </details>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let resumeId = null;
+let jdId     = null;
+
+// ── Step indicator ─────────────────────────────────────────────────────────
+function updateSteps() {
+  const s1 = document.getElementById('step1Indicator');
+  const s2 = document.getElementById('step2Indicator');
+  const s3 = document.getElementById('step3Indicator');
+  const d1 = document.getElementById('step1Dot');
+  const d2 = document.getElementById('step2Dot');
+  const d3 = document.getElementById('step3Dot');
+
+  if (resumeId) { s1.classList.add('done');   s1.classList.remove('active'); d1.textContent = '✓'; }
+  else          { s1.classList.add('active');  s1.classList.remove('done'); }
+
+  if (jdId)     { s2.classList.add('done');   s2.classList.remove('active'); d2.textContent = '✓'; }
+  else if (resumeId) { s2.classList.add('active'); s2.classList.remove('done'); }
+
+  if (resumeId && jdId) {
+    s3.classList.add('active');
+    document.getElementById('runMatchBtn').disabled = false;
+    document.getElementById('matchHint').textContent = 'Both resume and JD ready. Click "Run Match Analysis".';
+  }
+}
+
+// ── Resume Upload ──────────────────────────────────────────────────────────
+function handleResumeFile(input) {
+  if (!input.files.length) return;
+  const file = input.files[0];
+  if (file.size > 5 * 1024 * 1024) {
+    alert('File is too large. Please upload a file under 5 MB.');
+    return;
+  }
+  uploadResume(file);
+}
+
+function uploadResume(file) {
+  const loading  = document.getElementById('resumeLoading');
+  const analysis = document.getElementById('resumeAnalysis');
+  const status   = document.getElementById('resumeStatus');
+
+  analysis.classList.add('hidden');
+  loading.classList.remove('hidden');
+  status.textContent = 'Uploading…';
+
+  const fd = new FormData();
+  fd.append('resume', file);
+
+  fetch('/api/resume/upload', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      loading.classList.add('hidden');
+      if (data.error) {
+        status.textContent = '⚠ ' + data.error;
+        return;
+      }
+      resumeId = data.resume_id;
+      renderResumeAnalysis(data.analysis);
+      status.textContent = '✓ Parsed successfully';
+      updateSteps();
+      // highlight the upload zone
+      document.getElementById('uploadZone').style.borderColor = 'var(--green)';
+    })
+    .catch(() => {
+      loading.classList.add('hidden');
+      status.textContent = '⚠ Upload failed. Please try again.';
+    });
+}
+
+function renderResumeAnalysis(a) {
+  document.getElementById('resumeSummary').textContent = a.summary || '—';
+
+  document.getElementById('resumeSkills').innerHTML =
+    (a.skills || []).map(s => `<span class="pill pill-blue">${esc(s)}</span>`).join('') || '<span class="muted">None detected</span>';
+
+  document.getElementById('resumeStrengths').innerHTML =
+    (a.strengths || []).map(s => `<span class="pill pill-green">${esc(s)}</span>`).join('') || '<span class="muted">None detected</span>';
+
+  document.getElementById('resumeWeaknesses').innerHTML =
+    (a.weaknesses || []).map(s => `<span class="pill pill-neu">${esc(s)}</span>`).join('') || '<span class="muted">None detected</span>';
+
+  document.getElementById('resumeEducation').innerHTML =
+    (a.education || []).map(e => `<div>• <strong>${esc(e.degree || '')}</strong> — ${esc(e.institution || '')} ${e.year ? '(' + esc(e.year) + ')' : ''}</div>`).join('') || '—';
+
+  document.getElementById('resumeExperience').innerHTML =
+    (a.experience || []).map(e => `<div>• <strong>${esc(e.role || '')}</strong> at ${esc(e.company || '')}${e.duration ? ' · ' + esc(e.duration) : ''}</div>`).join('') || '—';
+
+  document.getElementById('resumeProjects').innerHTML =
+    (a.projects || []).map(p => `<div>• <strong>${esc(p.name || '')}</strong>${p.description ? ' — ' + esc(p.description) : ''}</div>`).join('') || '—';
+
+  document.getElementById('resumeAnalysis').classList.remove('hidden');
+}
+
+// Load a previously uploaded resume
+function loadExistingResume(rid, el) {
+  document.querySelectorAll('#prevResumeList .prev-item').forEach(x => x.classList.remove('selected'));
+  el.classList.add('selected');
+
+  const loading = document.getElementById('resumeLoading');
+  const status  = document.getElementById('resumeStatus');
+  loading.classList.remove('hidden');
+  status.textContent = 'Loading…';
+
+  fetch('/api/resume/load/' + rid)
+    .then(r => r.json())
+    .then(data => {
+      loading.classList.add('hidden');
+      if (data.error) { status.textContent = '⚠ ' + data.error; return; }
+      resumeId = data.resume_id;
+      renderResumeAnalysis(data.analysis);
+      status.textContent = '✓ Loaded';
+      updateSteps();
+    });
+}
+
+// ── JD Handling ────────────────────────────────────────────────────────────
+function handleJdFile(input) {
+  if (!input.files.length) return;
+  const fd = new FormData();
+  fd.append('jd_file', input.files[0]);
+
+  const loading = document.getElementById('jdLoading');
+  const status  = document.getElementById('jdStatus');
+  loading.classList.remove('hidden');
+  status.textContent = 'Parsing file…';
+
+  fetch('/api/jd/analyze', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      loading.classList.add('hidden');
+      if (data.error) { status.textContent = '⚠ ' + data.error; return; }
+      jdId = data.jd_id;
+      renderJdAnalysis(data.analysis);
+      status.textContent = '✓ Parsed successfully';
+      updateSteps();
+    })
+    .catch(() => {
+      loading.classList.add('hidden');
+      status.textContent = '⚠ Parse failed.';
+    });
+}
+
+function analyzeJd() {
+  const text = document.getElementById('jdText').value.trim();
+  if (!text) { alert('Please paste a job description first.'); return; }
+
+  const loading = document.getElementById('jdLoading');
+  const status  = document.getElementById('jdStatus');
+  document.getElementById('jdAnalysis').classList.add('hidden');
+  loading.classList.remove('hidden');
+  status.textContent = 'Analysing…';
+
+  fetch('/api/jd/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jd_text: text })
+  })
+    .then(r => r.json())
+    .then(data => {
+      loading.classList.add('hidden');
+      if (data.error) { status.textContent = '⚠ ' + data.error; return; }
+      jdId = data.jd_id;
+      renderJdAnalysis(data.analysis);
+      status.textContent = '✓ Extracted successfully';
+      updateSteps();
+    })
+    .catch(() => {
+      loading.classList.add('hidden');
+      status.textContent = '⚠ Analysis failed.';
+    });
+}
+
+function renderJdAnalysis(a) {
+  document.getElementById('jdRole').textContent = a.role || '—';
+  document.getElementById('jdExp').textContent  = a.experience_required || '—';
+
+  document.getElementById('jdRequired').innerHTML =
+    (a.required_skills || []).map(s => `<span class="pill pill-red">${esc(s)}</span>`).join('') || '<span class="muted">None detected</span>';
+
+  document.getElementById('jdPreferred').innerHTML =
+    (a.preferred_skills || []).map(s => `<span class="pill pill-purple">${esc(s)}</span>`).join('') || '<span class="muted">None detected</span>';
+
+  document.getElementById('jdAnalysis').classList.remove('hidden');
+}
+
+function loadExistingJd(jid, el) {
+  document.querySelectorAll('.prev-item').forEach(x => x.classList.remove('selected'));
+  el.classList.add('selected');
+
+  fetch('/api/jd/load/' + jid)
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) return;
+      jdId = data.jd_id;
+      document.getElementById('jdText').value = data.jd_text || '';
+      renderJdAnalysis(data.analysis);
+      document.getElementById('jdStatus').textContent = '✓ Loaded';
+      updateSteps();
+    });
+}
+
+// ── Match Engine ───────────────────────────────────────────────────────────
+function runMatch() {
+  if (!resumeId || !jdId) {
+    alert('Please complete both Resume and Job Description steps first.');
+    return;
+  }
+
+  const loading = document.getElementById('matchLoading');
+  const results = document.getElementById('matchResults');
+  const hint    = document.getElementById('matchHint');
+
+  results.classList.add('hidden');
+  loading.classList.remove('hidden');
+  hint.textContent = 'Running match analysis…';
+  document.getElementById('runMatchBtn').disabled = true;
+
+  fetch('/api/match', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resume_id: resumeId, jd_id: jdId })
+  })
+    .then(r => r.json())
+    .then(data => {
+      loading.classList.add('hidden');
+      document.getElementById('runMatchBtn').disabled = false;
+      if (data.error) {
+        hint.textContent = '⚠ ' + data.error;
+        return;
+      }
+      hint.textContent = '';
+      renderMatchResults(data);
+
+      // Update step 3
+      const s3 = document.getElementById('step3Indicator');
+      const d3 = document.getElementById('step3Dot');
+      s3.classList.add('done'); s3.classList.remove('active');
+      d3.textContent = '✓';
+    })
+    .catch(() => {
+      loading.classList.add('hidden');
+      document.getElementById('runMatchBtn').disabled = false;
+      hint.textContent = '⚠ Match failed. Please try again.';
+    });
+}
+
+function renderMatchResults(data) {
+  const score = Math.min(100, Math.max(0, data.match_score || 0));
+
+  // Animate ring
+  const circ   = document.getElementById('scoreCircle');
+  const radius = 56;
+  const circum = 2 * Math.PI * radius; // ≈ 351.9
+  const offset = circum - (score / 100) * circum;
+  circ.style.strokeDashoffset = offset;
+
+  // Score colour
+  const colour = score >= 70 ? 'var(--green)' : score >= 40 ? 'var(--amber)' : 'var(--red)';
+  circ.style.stroke = colour;
+  document.getElementById('scoreVal').textContent = score + '%';
+  document.getElementById('scoreVal').style.color = colour;
+
+  // Descriptor
+  const desc = score >= 85 ? 'Excellent match — strong candidate ✨'
+             : score >= 70 ? 'Good match — apply with confidence 👍'
+             : score >= 50 ? 'Moderate match — some gaps to address 🔧'
+             : score >= 30 ? 'Weak match — significant skill gaps ⚠'
+             :               'Poor match — consider upskilling first 📚';
+  document.getElementById('scoreDesc').textContent = desc;
+
+  // Sub metrics
+  if (document.getElementById('tfidfScoreVal')) {
+    document.getElementById('tfidfScoreVal').textContent = (data.tfidf_score || 0) + '%';
+  }
+  if (document.getElementById('mustHaveRateVal')) {
+    document.getElementById('mustHaveRateVal').textContent = (data.must_have_rate != null ? data.must_have_rate : score) + '%';
+  }
+  if (document.getElementById('preferredRateVal')) {
+    document.getElementById('preferredRateVal').textContent = (data.preferred_rate != null ? data.preferred_rate : 50) + '%';
+  }
+
+  // Topics & Evidence Blueprint
+  const topicsEl = document.getElementById('topicsEvidenceList');
+  if (topicsEl) {
+    topicsEl.innerHTML = '';
+    const topics = data.topics_evidence || [];
+    topics.forEach((t, idx) => {
+      const typeBadge = t.topic_type === 'core_claim' ? '<span class="pill pill-green" style="font-size:.65rem;">Core Claim</span>'
+                      : t.topic_type === 'experience_depth' ? '<span class="pill pill-blue" style="font-size:.65rem;">Architecture Depth</span>'
+                      : t.topic_type === 'skill_gap' ? '<span class="pill pill-red" style="font-size:.65rem;">Skill Gap Probe</span>'
+                      : t.topic_type === 'problem_solving' ? '<span class="pill pill-purple" style="font-size:.65rem;">Debugging/Resiliency</span>'
+                      : '<span class="pill" style="font-size:.65rem;">Ownership</span>';
+
+      topicsEl.innerHTML += `
+        <div style="background:var(--white);border:1px solid var(--border);border-radius:6px;padding:.75rem 1rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.3rem;">
+            <div style="font-weight:600;font-size:.85rem;">
+              <span style="color:var(--muted);margin-right:.3rem;">#${idx + 1}</span> ${esc(t.topic_name)}
+            </div>
+            ${typeBadge}
+          </div>
+          <div style="font-size:.78rem;color:var(--muted);background:var(--bg);padding:.4rem .6rem;border-radius:4px;border-left:3px solid var(--text);">
+            <strong>Evidence Justification:</strong> ${esc(t.evidence_reason)}
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  // Launch CTA links
+  if (data.match_id) {
+    const launchUrl = '/interview?match_id=' + data.match_id;
+    const btnMain = document.getElementById('launchInterviewBtn');
+    const btnTop  = document.getElementById('launchInterviewBtnTop');
+    if (btnMain) btnMain.href = launchUrl;
+    if (btnTop)  { btnTop.href = launchUrl; btnTop.style.display = 'inline-flex'; }
+  }
+
+  // Matched skills
+  document.getElementById('matchedSkills').innerHTML =
+    (data.matched_skills || []).length
+      ? (data.matched_skills).map(s => `<span class="pill pill-green">${esc(s)}</span>`).join('')
+      : '<span class="muted" style="font-size:.8rem;">No matching skills found</span>';
+
+  // Missing skills
+  document.getElementById('missingSkills').innerHTML =
+    (data.missing_skills || []).length
+      ? (data.missing_skills).map(s => `<span class="pill pill-red">${esc(s)}</span>`).join('')
+      : '<span class="muted" style="font-size:.8rem;">No missing required skills 🎉</span>';
+
+  // Category breakdown
+  const catWrap = document.getElementById('categoryBreakdownWrap');
+  const catList = document.getElementById('categoryBreakdownList');
+  if (catWrap && catList && data.category_breakdown && data.category_breakdown.length) {
+    catList.innerHTML = '';
+    data.category_breakdown.forEach(c => {
+      catList.innerHTML += `
+        <span class="pill" style="font-size:.75rem;padding:.3rem .6rem;">
+          <strong>${esc(c.category)}:</strong> ${c.matched}/${c.total} (${c.percentage}%)
+        </span>
+      `;
+    });
+    catWrap.classList.remove('hidden');
+  }
+
+  // Improvement areas
+  const iaEl = document.getElementById('improvementAreas');
+  iaEl.innerHTML = '';
+  (data.improvement_areas || []).forEach(ia => {
+    const area = (ia && ia.area) ? ia.area : String(ia);
+    const sug  = (ia && ia.suggestion) ? ia.suggestion : '';
+    iaEl.innerHTML += `
+      <div class="imp-card">
+        <div class="imp-area">${esc(area)}</div>
+        ${sug ? `<div class="imp-sug">${esc(sug)}</div>` : ''}
+      </div>`;
+  });
+
+  document.getElementById('matchResults').classList.remove('hidden');
+  document.getElementById('matchResults').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Drag & drop on upload zone
+const zone = document.getElementById('uploadZone');
+zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) uploadResume(file);
+});
+</script>
+{% endblock %}

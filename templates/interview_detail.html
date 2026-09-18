@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Interview Detail{% endblock %}
+{% block content %}
+
+<div class="row" style="margin-bottom:1.4rem;">
+  <a href="{{ url_for('user_dashboard') }}" class="btn btn-sm">← Back</a>
+  <div>
+    <h2 style="font-size:1rem;font-weight:600;">{{ iv.job_role }} · {{ iv.test_type | capitalize }}</h2>
+    <p class="muted">{{ iv.created_at[:10] }} · {{ iv.experience | capitalize }} · Score: {{ iv.avg_score }}/10</p>
+  </div>
+</div>
+
+{% for h in iv.history %}
+  {% if h.answer %}
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;">
+      <div style="flex:1;">
+        <span class="lbl">Q{{ loop.index }}</span>
+        <p style="font-size:.93rem;line-height:1.6;margin-bottom:.7rem;">{{ h.question }}</p>
+        <hr class="divider"/>
+        <p style="font-size:.86rem;line-height:1.65;color:var(--muted);font-style:italic;">"{{ h.answer }}"</p>
+      </div>
+      {% if h.analysis %}
+      <div style="flex-shrink:0;text-align:right;">
+        <div style="font-size:1.3rem;font-weight:700;">{{ h.analysis.quality_score }}<span style="font-size:.75rem;font-weight:400;color:var(--muted);">/10</span></div>
+        <div class="muted" style="font-size:.72rem;margin-top:.2rem;">{{ h.analysis.sentiment }} · {{ h.analysis.emotion }}</div>
+        {% if h.analysis.plagiarism_risk == 'high' %}
+          <span class="pill pill-neg" style="margin-top:.3rem;display:inline-block;">plagiarism risk</span>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% if h.analysis and h.analysis.quality_reason %}
+    <p class="muted" style="font-size:.78rem;margin-top:.6rem;">{{ h.analysis.quality_reason }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+{% endfor %}
+{% endblock %}
