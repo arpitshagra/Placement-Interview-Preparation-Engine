@@ -19,6 +19,7 @@ from flask import Flask, request, jsonify, render_template, send_file, session, 
 import whisper, edge_tts
 from groq import Groq
 import database as db
+from ml_engine import compute_tfidf_similarity, analyze_skills_with_pandas, select_topics_with_evidence
 
 # ── App Setup ─────────────────────────────────────────────────────────────────
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "API_KEY.env"))
@@ -227,103 +228,242 @@ def llm(system: str, user: str, temperature: float = 0.4) -> str:
     raise RuntimeError(f"All Groq models failed. Last error: {last_error}")
 
 
-def generate_question(sess: dict) -> str:
-    """Ask the LLM to generate one interview question based on job role and difficulty."""
-    system = ("You are a professional interviewer. "
-              "Generate exactly ONE interview question. "
-              "Return only the question — no preamble, no numbering.")
-    user   = (f"Role: {sess['job_role']}\nExperience: {sess['experience']}\n"
-              f"Test type: {sess['test_type']}\nDifficulty: {sess['difficulty']}\n"
-              "Ask a focused question appropriate for this role.")
-    return llm(system, user, temperature=0.6)
+def generate_rubric_question(sess: dict, topic_dict: dict, is_followup: bool = False, prev_answer: str = "") -> dict:
+    """
+    Generate an interview question grounded directly in the topic's verifiable evidence,
+    along with a concise scoring rubric and follow-up guidance.
+    """
+    role = sess.get("job_role", "Software Engineer")
+    topic_name = topic_dict.get("topic_name", "Technical Concept")
+    focus_area = topic_dict.get("focus_area", "")
+    evidence = topic_dict.get("evidence_reason", "")
+    diff = sess.get("difficulty", "medium")
 
-def analyse_answer(sess: dict, question: str, answer: str) -> dict:
+    if is_followup:
+        system = """You are a senior technical interviewer asking a follow-up question.
+The candidate's previous response was brief or needed deeper verification.
+Ask a targeted follow-up probe that directly tests their practical mastery.
+Return ONLY valid JSON:
+{
+  "question": "1-2 sentence targeted follow-up question",
+  "rubric": {
+    "expected_concepts": ["concept 1", "concept 2", "concept 3"],
+    "scoring_criteria": "Brief description of what a score of 10 vs 5 vs 2 looks like.",
+    "common_pitfalls": ["pitfall 1", "pitfall 2"]
+  }
+}"""
+        user_prompt = (
+            f"Role: {role}\nTopic: {topic_name}\nEvidence Justification: {evidence}\n"
+            f"Candidate's Previous Answer: {prev_answer}\nAsk a probing follow-up question."
+        )
+    else:
+        system = """You are a senior technical interviewer conducting an adaptive interview.
+Generate ONE focused interview question strictly grounded in the provided topic and evidence justification.
+Also provide a concise scoring rubric.
+Return ONLY valid JSON:
+{
+  "question": "1-2 sentence clear, direct interview question",
+  "rubric": {
+    "expected_concepts": ["concept 1", "concept 2", "concept 3"],
+    "scoring_criteria": "Brief description of what a score of 10 vs 5 vs 2 looks like.",
+    "common_pitfalls": ["pitfall 1", "pitfall 2"]
+  }
+}"""
+        user_prompt = (
+            f"Role: {role} (Experience: {sess.get('experience', 'mid')}, Difficulty: {diff})\n"
+            f"Topic: {topic_name}\nFocus Area: {focus_area}\n"
+            f"Why This Topic Was Selected (Evidence): {evidence}\n"
+            "Formulate a question that tests their authentic understanding of this claim."
+        )
+
+    try:
+        raw = llm(system, user_prompt, temperature=0.5)
+        raw = re.sub(r"```[a-z]*", "", raw).strip("` \n")
+        parsed = json.loads(raw)
+        if parsed.get("question") and parsed.get("rubric"):
+            parsed["topic_name"] = topic_name
+            parsed["evidence_reason"] = evidence
+            parsed["topic_type"] = topic_dict.get("topic_type", "core_claim")
+            return parsed
+    except Exception as e:
+        print(f"[app.py] LLM question gen retry: {e}")
+
+    # Contextual dynamic fallback directly derived from topic & evidence
+    target_skills = topic_dict.get("target_skills", [role])
+    skill_str = ", ".join(str(s) for s in target_skills[:2]) if target_skills else role
+    if is_followup:
+        fallback_q = f"In that approach with {skill_str}, how did you measure performance and what was the main technical trade-off?"
+    else:
+        fallback_q = f"Regarding {topic_name}, could you explain your architectural approach and how you implemented {skill_str} in production?"
+
+    return {
+        "question": fallback_q,
+        "rubric": {
+            "expected_concepts": target_skills + ["Architecture trade-offs", "Edge-case handling"],
+            "scoring_criteria": "10: Demonstrates deep architectural reasoning and practical mastery. 5: Basic theoretical definitions. 2: Vague response.",
+            "common_pitfalls": ["Overly generic claims without concrete examples", "Ignoring system constraints"]
+        },
+        "topic_name": topic_name,
+        "evidence_reason": evidence,
+        "topic_type": topic_dict.get("topic_type", "core_claim")
+    }
+
+
+
+def analyse_rubric_answer(sess: dict, topic_dict: dict, current_q_data: dict, answer: str) -> dict:
     """
-    Send the current Q&A to the LLM for evaluation.
-    Returns a JSON dict with score, sentiment, emotion, plagiarism risk, etc.
+    Evaluate candidate's answer against the topic's explicit rubric dimensions:
+    - Technical Accuracy (1-10)
+    - Problem Solving & Depth (1-10)
+    - Communication Clarity (1-10)
+    - Evidence & Practical Grounding (1-10)
+    - Overall Quality Score (1-10)
+    - AI Plagiarism Risk (low | medium | high)
     """
-    asked   = len(sess["history"])
-    total_q = sess["total_q"]
+    question = current_q_data.get("question", "")
+    rubric = current_q_data.get("rubric", {})
+    evidence = topic_dict.get("evidence_reason", "")
 
     system = """You are an expert AI interview evaluator and AI-content detector.
-Return ONLY valid JSON — no markdown, no extra text.
-Schema:
+Evaluate the candidate's answer strictly against the provided question, rubric, and evidence context.
+Return ONLY valid JSON:
 {
-  "quality_score": <1-10>,
+  "quality_score": <overall 1-10 integer score>,
+  "technical_accuracy": <1-10 integer score>,
+  "problem_solving": <1-10 integer score>,
+  "communication_clarity": <1-10 integer score>,
+  "evidence_grounding": <1-10 integer score demonstrating authentic project experience>,
+  "rubric_feedback": "2-3 sentences of precise, constructive critique referencing rubric criteria",
   "sentiment": "positive"|"neutral"|"negative",
   "emotion": "confident"|"nervous"|"confused"|"enthusiastic"|"unsure",
   "plagiarism_risk": "low"|"medium"|"high",
-  "plagiarism_reason": "<1 sentence explaining why you flagged this level>",
+  "plagiarism_reason": "<1 sentence explaining plagiarism risk assessment>",
+  "is_shallow_answer": true|false,
   "next_difficulty": "easy"|"medium"|"hard",
-  "done": true|false,
-  "next_question": "<next question or empty string if done>",
-  "brief_acknowledgement": "<1 short sentence response to the answer>"
+  "brief_acknowledgement": "<1 short sentence encouraging response acknowledging the answer>"
 }
-emotion: detect how the candidate sounds based on word choice and structure.
 
-PLAGIARISM / AI-DETECTION RULES (very important):
-Analyse the answer carefully for signs it was generated by an AI (ChatGPT, Gemini, etc.) or copy-pasted from the internet.
-- "high": The answer reads like AI-generated text — overly structured, uses filler phrases like "In conclusion", "It's important to note", "There are several key aspects", unnaturally comprehensive, bullet-point-like enumeration in prose, or textbook-perfect with no personal voice.
-- "medium": The answer is partially original but contains some generic/memorised phrasing that could be from a textbook or AI. Mixed signals.
-- "low": The answer sounds genuinely human — has personal phrasing, casual tone, minor imperfections, specific personal experiences, or natural conversational style.
-Look for: unnatural fluency, overly balanced pros/cons, generic examples, lack of personal anecdotes, perfect grammar with no filler words, and suspiciously well-organized structure.
+Plagiarism & AI detection rules:
+- 'high': Reads like textbook ChatGPT copy-paste (overly formulaic enumerations, filler introductory phrases).
+- 'medium': Generic phrasing with mixed signals.
+- 'low': Authentic human response with personal phrasing and practical trade-off mentions."""
 
-Raise difficulty if score>=7, lower if <=4. Set done=true when asked equals total.
-CRITICAL: Always generate a NEW, different question for 'next_question'. Never repeat the same question or ask the user to try again, even if their answer was incorrect or incomplete."""
-
-    user = (f"Role: {sess['job_role']} | Experience: {sess['experience']}\n"
-            f"Question {asked}/{total_q}: {question}\n"
-            f"Answer: {answer}\n\nReturn JSON only.")
-
-    raw = llm(system, user, temperature=0.3)
-    raw = re.sub(r"```[a-z]*", "", raw).strip("` \n")   # remove markdown code fences if any
+    user_prompt = (
+        f"Question: {question}\n"
+        f"Expected Concepts: {json.dumps(rubric.get('expected_concepts', []))}\n"
+        f"Scoring Guide: {rubric.get('scoring_criteria', '')}\n"
+        f"Common Pitfalls: {json.dumps(rubric.get('common_pitfalls', []))}\n"
+        f"Topic Evidence Justification: {evidence}\n\n"
+        f"Candidate Answer: {answer}\n\n"
+        "Evaluate thoroughly and return JSON."
+    )
 
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        # Fallback if LLM returns invalid JSON
+        raw = llm(system, user_prompt, temperature=0.2)
+        raw = re.sub(r"```[a-z]*", "", raw).strip("` \n")
+        res = json.loads(raw)
+        res["quality_score"] = int(res.get("quality_score", 6))
+        return res
+    except Exception as e:
+        print(f"[app.py] Rubric analysis fallback: {e}")
+        word_count = len((answer or "").split())
+        score = 7 if word_count > 30 else (5 if word_count > 10 else 3)
         return {
-            "quality_score": 5,
+            "quality_score": score,
+            "technical_accuracy": score,
+            "problem_solving": score,
+            "communication_clarity": score,
+            "evidence_grounding": score,
+            "rubric_feedback": "Answer provided basic coverage of the required concepts. Recommend adding more concrete project examples.",
             "sentiment": "neutral",
-            "emotion": "unsure",
+            "emotion": "confident" if score >= 6 else "unsure",
             "plagiarism_risk": "low",
-            "next_difficulty": sess["difficulty"],
-            "done": asked >= total_q,
-            "next_question": "",
-            "brief_acknowledgement": "Thank you."
+            "plagiarism_reason": "Authentic concise candidate response.",
+            "is_shallow_answer": score < 6,
+            "next_difficulty": sess.get("difficulty", "medium"),
+            "brief_acknowledgement": "Thank you for explaining your approach."
         }
 
-def generate_feedback(sess: dict) -> dict:
-    """Generate a final structured feedback and spoken summary for the whole interview."""
-    # Build a summary of all questions + scores
-    summary = "".join(
-        f"Q{i}: {h['question']}\nScore: {(h.get('analysis') or {}).get('quality_score', '?')}/10\n\n"
-        for i, h in enumerate(sess["history"], 1)
-    )
-    system = """You are a professional interview coach.
-Return ONLY valid JSON — no markdown, no extra text.
-Schema:
+
+def generate_practice_report_feedback(sess: dict) -> dict:
+    """
+    Generate an auditable, comprehensive final practice report including readiness index,
+    radar metrics, diagnosed weak areas, and a personalized 7-day actionable study plan.
+    """
+    history = sess.get("history", [])
+    history_summary = []
+    scores = []
+    dim_tech, dim_prob, dim_comm, dim_evid = [], [], [], []
+
+    for i, h in enumerate(history, 1):
+        an = h.get("analysis") or {}
+        q = h.get("question", "")
+        topic = h.get("topic_name", f"Topic {i}")
+        score = an.get("quality_score", 5)
+        scores.append(score)
+        dim_tech.append(an.get("technical_accuracy", score))
+        dim_prob.append(an.get("problem_solving", score))
+        dim_comm.append(an.get("communication_clarity", score))
+        dim_evid.append(an.get("evidence_grounding", score))
+        history_summary.append(f"Q{i} [{topic}]: {q}\nScore: {score}/10 | Feedback: {an.get('rubric_feedback', '')}")
+
+    avg_score = round(sum(scores) / max(len(scores), 1), 1)
+    readiness_idx = int(min(100, max(10, avg_score * 10)))
+
+    system = """You are a senior placement director and career coach.
+Generate a comprehensive, actionable placement practice report.
+Return ONLY valid JSON:
 {
-  "strong_points": ["point 1", "point 2"],
-  "weak_points": ["point 1", "point 2"],
-  "improvements": ["point 1", "point 2"],
-  "spoken_summary": "A 5-7 sentence spoken summary. Cover strengths, one area to improve, and one specific resource. Speak naturally."
+  "strong_points": [
+    "Specific technical strength demonstrated in the session",
+    "Another concrete strength with evidence"
+  ],
+  "weak_areas": [
+    "Specific weak technical area or conceptual gap identified",
+    "Another actionable area needing deeper study"
+  ],
+  "action_plan_7_day": [
+    {"day": "Day 1-2", "focus": "Topic Area", "task": "Specific coding/architecture exercise"},
+    {"day": "Day 3-4", "focus": "Topic Area", "task": "Specific system design or debugging drill"},
+    {"day": "Day 5-6", "focus": "Topic Area", "task": "Project mock drill & STAR alignment"},
+    {"day": "Day 7",   "focus": "Review",     "task": "Re-take adaptive interview & verify weak areas"}
+  ],
+  "spoken_summary": "A natural 5-7 sentence spoken executive summary of candidate readiness."
 }"""
-    raw = llm(
-        system,
-        f"Role: {sess['job_role']} ({sess['experience']}) | Type: {sess['test_type']}\n\n{summary}",
-        temperature=0.5
+
+    user_prompt = (
+        f"Candidate Role: {sess.get('job_role')} ({sess.get('experience')})\n"
+        f"Overall Session Average: {avg_score}/10 (Readiness: {readiness_idx}%)\n\n"
+        f"Session Audit Log:\n" + "\n\n".join(history_summary)
     )
-    raw = re.sub(r"```[a-z]*", "", raw).strip("` \n")
+
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {
-            "strong_points": ["Good effort overall."],
-            "weak_points": ["Some answers lacked detail."],
-            "improvements": ["Practice structuring answers using the STAR method."],
-            "spoken_summary": "Thank you for completing the interview. You made a good effort overall, but some answers lacked detail. I recommend practicing the STAR method for structuring your responses. Good luck!"
+        raw = llm(system, user_prompt, temperature=0.4)
+        raw = re.sub(r"```[a-z]*", "", raw).strip("` \n")
+        feedback = json.loads(raw)
+    except Exception as e:
+        print(f"[app.py] Practice report fallback: {e}")
+        feedback = {
+            "strong_points": [f"Demonstrated foundational understanding in {sess.get('job_role')} core concepts."],
+            "weak_areas": ["Needs to structure answers with deeper edge-case analysis and quantitative metrics."],
+            "action_plan_7_day": [
+                {"day": "Day 1-2", "focus": "Core Architecture", "task": "Review core documentation and build a small proof-of-concept."},
+                {"day": "Day 3-4", "focus": "Debugging & Resiliency", "task": "Practice troubleshooting production race conditions and query profiling."},
+                {"day": "Day 5-6", "focus": "Project Deep-Dive", "task": "Prepare 3 STAR-format project stories with architectural trade-offs."},
+                {"day": "Day 7",   "focus": "Final Drill",     "task": "Re-run the adaptive interview engine."}
+            ],
+            "spoken_summary": f"Thank you for completing your technical interview for {sess.get('job_role')}. You showed solid fundamentals, and with focused practice on edge-case depth, you will be well prepared."
         }
+
+    feedback["readiness_index"] = readiness_idx
+    feedback["dimension_averages"] = {
+        "technical_accuracy": round(sum(dim_tech) / max(len(dim_tech), 1), 1),
+        "problem_solving": round(sum(dim_prob) / max(len(dim_prob), 1), 1),
+        "communication_clarity": round(sum(dim_comm) / max(len(dim_comm), 1), 1),
+        "evidence_grounding": round(sum(dim_evid) / max(len(dim_evid), 1), 1),
+    }
+    return feedback
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TEXT-TO-SPEECH (TTS) — Microsoft Edge Neural Voice
@@ -359,48 +499,241 @@ def speak(text: str, filename: str) -> str:
 # INTERVIEW API ROUTES
 # ─────────────────────────────────────────────────────────────────────────────
 
+@app.route("/api/start-from-upload", methods=["POST"])
+@login_required
+def api_start_from_upload():
+    """
+    All-in-one endpoint: Upload Resume + JD → Parse → Match → Start Adaptive Interview.
+    Accepts multipart/form-data:
+      - resume_file: PDF or DOCX file
+      - jd_text: Job description plain text (OR jd_file: PDF/DOCX)
+      - experience: junior|mid|senior (optional, default mid)
+    Returns: First interview question + session_id + topics_evidence (same as /api/start)
+    """
+    uid = session["user_id"]
+    experience = request.form.get("experience", "mid")
+
+    # ── 1. Parse Resume ───────────────────────────────────────────────────────
+    resume_file = request.files.get("resume_file")
+    if not resume_file or not allowed_resume(resume_file.filename):
+        return jsonify({"error": "Please upload a PDF or DOCX resume."}), 400
+
+    ext = resume_file.filename.rsplit(".", 1)[-1].lower()
+    safe_name = f"resume_{uid}_{uuid.uuid4().hex[:8]}.{ext}"
+    resume_path = os.path.join(UPLOADS_FOLDER, safe_name)
+    resume_file.save(resume_path)
+
+    try:
+        from resume_parser import parse_resume
+        resume_raw = parse_resume(resume_path, ext)
+    except Exception as e:
+        return jsonify({"error": f"Could not read resume file: {e}"}), 500
+
+    if not resume_raw or len(resume_raw.strip()) < 50:
+        return jsonify({"error": "Resume appears empty or unreadable. Try a different file."}), 400
+
+    # ── 2. Parse JD ───────────────────────────────────────────────────────────
+    jd_text = (request.form.get("jd_text") or "").strip()
+    jd_file = request.files.get("jd_file")
+
+    if not jd_text and jd_file and jd_file.filename:
+        jd_ext = jd_file.filename.rsplit(".", 1)[-1].lower() if "." in jd_file.filename else "txt"
+        safe_jd = f"jd_{uid}_{uuid.uuid4().hex[:8]}.{jd_ext}"
+        jd_path = os.path.join(UPLOADS_FOLDER, safe_jd)
+        jd_file.save(jd_path)
+        try:
+            from resume_parser import parse_resume as parse_doc
+            jd_text = parse_doc(jd_path, jd_ext)
+        except Exception as e:
+            return jsonify({"error": f"Could not read JD file: {e}"}), 500
+
+    if not jd_text or len(jd_text.strip()) < 30:
+        return jsonify({"error": "Job description is required (paste text or upload a file)."}), 400
+
+    # ── 3. LLM Structuring ────────────────────────────────────────────────────
+    print(f"[upload-start] Analysing resume ({len(resume_raw)} chars) + JD ({len(jd_text)} chars)...")
+    resume_analysis = analyze_resume_with_llm(resume_raw)
+    jd_analysis     = analyze_jd_with_llm(jd_text)
+
+    # Save to DB
+    resume_id = db.save_resume(uid, safe_name, ext, resume_raw, resume_analysis)
+    jd_id     = db.save_jd(uid, jd_text, jd_analysis)
+
+    # ── 4. ML Match Engine ────────────────────────────────────────────────────
+    resume_data = {
+        "skills":     resume_analysis.get("skills",     []),
+        "experience": resume_analysis.get("experience", []),
+        "education":  resume_analysis.get("education",  []),
+        "projects":   resume_analysis.get("projects",   []),
+    }
+    jd_data = {
+        "role":                jd_analysis.get("role", "Software Engineer"),
+        "required_skills":    jd_analysis.get("required_skills",  []),
+        "preferred_skills":   jd_analysis.get("preferred_skills", []),
+        "experience_required": jd_analysis.get("experience_required", ""),
+    }
+
+    result   = run_match_engine(resume_data, jd_data, resume_raw_text=resume_raw, jd_raw_text=jd_text)
+    match_id = db.save_match(uid, resume_id, jd_id, result)
+
+    job_role        = jd_data["role"] or "Software Engineer"
+    topics_evidence = result["topics_evidence"]
+
+    # ── 5. Build Interview Session ────────────────────────────────────────────
+    sess = {
+        "id": str(uuid.uuid4()),
+        "user_id": uid,
+        "match_id": match_id,
+        "resume_id": resume_id,
+        "jd_id": jd_id,
+        "job_role": job_role,
+        "experience": experience,
+        "test_type": "adaptive_technical",
+        "topics_evidence": topics_evidence,
+        "current_topic_idx": 0,
+        "total_q": len(topics_evidence),
+        "history": [],
+        "has_asked_followup_for_current_topic": False,
+        "difficulty": "medium",
+        "finished": False,
+    }
+    interview_sessions[sess["id"]] = sess
+
+    first_topic = topics_evidence[0]
+    q_data = generate_rubric_question(sess, first_topic, is_followup=False)
+
+    sess["history"].append({
+        "question":       q_data["question"],
+        "rubric":         q_data.get("rubric", {}),
+        "topic_name":     first_topic["topic_name"],
+        "topic_number":   first_topic.get("topic_number", 1),
+        "topic_type":     first_topic.get("topic_type", "core_claim"),
+        "evidence_reason": first_topic.get("evidence_reason", ""),
+        "is_followup":    False,
+        "answer":         None,
+        "analysis":       None,
+    })
+
+    audio_file = f"{sess['id']}_q0.mp3"
+    speak(
+        f"Welcome. Your resume and job description have been analysed. "
+        f"Starting your adaptive technical interview for the role of {job_role}. "
+        f"Topic 1: {first_topic['topic_name']}. {q_data['question']}",
+        audio_file,
+    )
+
+    return jsonify({
+        "success":        True,
+        "session_id":     sess["id"],
+        "match_id":       match_id,
+        "job_role":       job_role,
+        "match_score":    result["match_score"],
+        "tfidf_score":    result["tfidf_score"],
+        "matched_skills": result["matched_skills"],
+        "missing_skills": result["missing_skills"],
+        "topics_evidence": topics_evidence,
+        "question":       q_data["question"],
+        "rubric":         q_data.get("rubric", {}),
+        "topic_name":     first_topic["topic_name"],
+        "topic_type":     first_topic.get("topic_type", "core_claim"),
+        "evidence_reason": first_topic.get("evidence_reason", ""),
+        "question_num":   1,
+        "total_q":        sess["total_q"],
+        "difficulty":     "medium",
+        "audio_url":      f"/audio/{audio_file}",
+    })
+
+
 @app.route("/api/start", methods=["POST"])
 @login_required
 def api_start():
     """
-    Start a new interview session.
-    Expects JSON: { job_role, experience, test_type, total_q }
-    Returns: { session_id, question, audio_url }
+    Start a new adaptive interview session.
+    Accepts optional match_id to initialize interview from Resume x JD match evidence.
     """
     data = request.get_json() or {}
-    if not data.get("job_role"):
+    match_id = data.get("match_id")
+    job_role = (data.get("job_role") or "").strip()
+    match_data = None
+
+    if match_id:
+        try:
+            match_data = db.get_match_by_id(int(match_id), session["user_id"])
+        except Exception as e:
+            print(f"[api_start] Error loading match {match_id}: {e}")
+
+    if match_data:
+        job_role = match_data.get("jd_role") or job_role or "Software Engineer"
+        topics_evidence = match_data.get("topics_evidence") or []
+        resume_id = match_data.get("resume_id")
+        jd_id = match_data.get("jd_id")
+    else:
+        resume_id = None
+        jd_id = None
+        topics_evidence = []
+
+    if not job_role:
         return jsonify({"error": "job_role is required"}), 400
 
-    # Create a new session dict to track this interview
+    if not topics_evidence:
+        topics_evidence = [
+            {"topic_number": 1, "topic_name": "Core Technical & Project Mastery", "topic_type": "core_claim", "focus_area": "Main framework & architecture", "evidence_reason": f"Core candidate claim for {job_role}."},
+            {"topic_number": 2, "topic_name": "System Scalability & Performance", "topic_type": "experience_depth", "focus_area": "High-throughput design and state management", "evidence_reason": f"Scale requirement for {job_role}."},
+            {"topic_number": 3, "topic_name": "Adaptive Problem Solving & Concept Depth", "topic_type": "skill_gap", "focus_area": "Edge cases & transferrable knowledge", "evidence_reason": f"Assessing adaptability in {job_role}."},
+            {"topic_number": 4, "topic_name": "Debugging & Production Resiliency", "topic_type": "problem_solving", "focus_area": "Root cause analysis and troubleshooting", "evidence_reason": f"Production readiness in {job_role}."},
+            {"topic_number": 5, "topic_name": "Technical Ownership & Trade-offs", "topic_type": "ownership", "focus_area": "Engineering trade-offs and code quality", "evidence_reason": f"Engineering maturity for {job_role}."}
+        ]
+
     sess = {
-        "id":         str(uuid.uuid4()),          # unique ID for this interview
-        "user_id":    session["user_id"],
-        "job_role":   data.get("job_role"),
+        "id": str(uuid.uuid4()),
+        "user_id": session["user_id"],
+        "match_id": match_id,
+        "resume_id": resume_id,
+        "jd_id": jd_id,
+        "job_role": job_role,
         "experience": data.get("experience", "mid"),
-        "test_type":  data.get("test_type", "mixed"),
-        "total_q":    int(data.get("total_q", 6)),
-        "history":    [],                          # list of {question, answer, analysis}
+        "test_type": data.get("test_type", "adaptive_technical"),
+        "topics_evidence": topics_evidence,
+        "current_topic_idx": 0,
+        "total_q": len(topics_evidence),
+        "history": [],
+        "has_asked_followup_for_current_topic": False,
         "difficulty": "medium",
-        "finished":   False,
+        "finished": False,
     }
     interview_sessions[sess["id"]] = sess
 
-    # Generate the first question
-    question = generate_question(sess)
-    sess["history"].append({"question": question, "answer": None, "analysis": None})
+    # Generate Question #1 with Rubric
+    first_topic = topics_evidence[0]
+    q_data = generate_rubric_question(sess, first_topic, is_followup=False)
 
-    # Speak the welcome message + first question
+    sess["history"].append({
+        "question": q_data["question"],
+        "rubric": q_data.get("rubric", {}),
+        "topic_name": first_topic["topic_name"],
+        "topic_number": first_topic.get("topic_number", 1),
+        "topic_type": first_topic.get("topic_type", "core_claim"),
+        "evidence_reason": first_topic.get("evidence_reason", ""),
+        "is_followup": False,
+        "answer": None,
+        "analysis": None
+    })
+
+    # Speak welcome + first question
     audio_file = f"{sess['id']}_q0.mp3"
-    speak(f"Welcome. Let us begin your {sess['test_type']} interview "
-          f"for the role of {sess['job_role']}. Here is your first question. {question}",
-          audio_file)
+    speak(f"Welcome. Let us begin your adaptive technical interview for the role of {sess['job_role']}. "
+          f"Topic 1: {first_topic['topic_name']}. {q_data['question']}", audio_file)
 
     return jsonify({
-        "session_id":   sess["id"],
-        "question":     question,
+        "session_id": sess["id"],
+        "question": q_data["question"],
+        "rubric": q_data.get("rubric", {}),
+        "topic_name": first_topic["topic_name"],
+        "topic_type": first_topic.get("topic_type", "core_claim"),
+        "evidence_reason": first_topic.get("evidence_reason", ""),
         "question_num": 1,
-        "total_q":      sess["total_q"],
-        "audio_url":    f"/audio/{audio_file}"
+        "total_q": sess["total_q"],
+        "audio_url": f"/audio/{audio_file}"
     })
 
 @app.route("/api/transcribe", methods=["POST"])
@@ -444,9 +777,9 @@ def api_transcribe():
 @login_required
 def api_answer():
     """
-    Submit an answer (text) for the current question.
-    The LLM evaluates it and either returns the next question or final feedback.
-    Expects JSON: { session_id, text }
+    Submit an answer for evaluation against the explicit rubric.
+    Supports adaptive follow-ups if initial answer is superficial,
+    advances topic, and outputs auditable Practice Report upon completion.
     """
     data       = request.get_json() or {}
     session_id = data.get("session_id")
@@ -461,76 +794,161 @@ def api_answer():
     if sess["finished"]:
         return jsonify({"error": "Interview already finished"}), 400
 
-    # Save the answer to history
-    current_q = sess["history"][-1]["question"]
-    sess["history"][-1]["answer"] = text
+    current_item = sess["history"][-1]
+    current_item["answer"] = text
 
-    # Check if this was the last question
-    asked      = len(sess["history"])
-    force_done = asked >= sess["total_q"]
+    topic_idx = sess.get("current_topic_idx", 0)
+    topics = sess.get("topics_evidence", [])
+    current_topic = topics[topic_idx] if topic_idx < len(topics) else {}
 
-    # Evaluate the answer with LLM
-    analysis = analyse_answer(sess, current_q, text)
-    if force_done:
-        analysis["done"] = True    # force end even if LLM says otherwise
+    # Rubric Analysis
+    analysis = analyse_rubric_answer(sess, current_topic, current_item, text)
+    current_item["analysis"] = analysis
 
-    sess["history"][-1]["analysis"] = analysis
-    sess["difficulty"] = analysis.get("next_difficulty", sess["difficulty"])
+    # Adaptive follow-up check:
+    # If answer was shallow (<6/10) and follow-up not yet asked for this topic, ask targeted probe
+    should_probe_followup = (
+        analysis.get("is_shallow_answer", False) or analysis.get("quality_score", 10) < 6
+    ) and not sess.get("has_asked_followup_for_current_topic", False) and not current_item.get("is_followup", False)
 
-    # ── Interview Finished ────────────────────────────────────────────────────
-    if analysis.get("done"):
+    if should_probe_followup:
+        sess["has_asked_followup_for_current_topic"] = True
+        followup_q = generate_rubric_question(sess, current_topic, is_followup=True, prev_answer=text)
+        sess["history"].append({
+            "question": followup_q["question"],
+            "rubric": followup_q.get("rubric", {}),
+            "topic_name": current_topic.get("topic_name", "Follow-up Probe"),
+            "topic_number": current_topic.get("topic_number", topic_idx + 1),
+            "topic_type": "followup",
+            "evidence_reason": current_topic.get("evidence_reason", ""),
+            "is_followup": True,
+            "answer": None,
+            "analysis": None
+        })
+        q_idx = len(sess["history"])
+        audio_file = f"{session_id}_q{q_idx}.mp3"
+        ack = analysis.get("brief_acknowledgement", "Understood.")
+        speak(f"{ack} Here is a follow-up probe: {followup_q['question']}", audio_file)
+
+        return jsonify({
+            "transcription": text,
+            "finished": False,
+            "is_followup": True,
+            "rubric_feedback": analysis.get("rubric_feedback", ""),
+            "quality_score": analysis.get("quality_score", 5),
+            "technical_accuracy": analysis.get("technical_accuracy", 5),
+            "problem_solving": analysis.get("problem_solving", 5),
+            "communication_clarity": analysis.get("communication_clarity", 5),
+            "evidence_grounding": analysis.get("evidence_grounding", 5),
+            "next_question": followup_q["question"],
+            "rubric": followup_q.get("rubric", {}),
+            "topic_name": current_topic.get("topic_name", ""),
+            "evidence_reason": current_topic.get("evidence_reason", ""),
+            "question_num": topic_idx + 1,
+            "total_q": len(topics),
+            "audio_url": f"/audio/{audio_file}"
+        })
+
+    # Move to next topic
+    sess["current_topic_idx"] += 1
+    sess["has_asked_followup_for_current_topic"] = False
+    next_topic_idx = sess["current_topic_idx"]
+
+    # If all topics completed:
+    if next_topic_idx >= len(topics):
         sess["finished"] = True
-        feedback   = generate_feedback(sess)
+        feedback = generate_practice_report_feedback(sess)
 
-        # Speak the feedback
+        # Audio summary
         audio_file = f"{session_id}_feedback.mp3"
-        speak(feedback.get("spoken_summary", "Thank you."), audio_file)
+        speak(feedback.get("spoken_summary", "Thank you for completing your technical interview."), audio_file)
 
-        # Calculate average score across all questions
-        scores = [h["analysis"].get("quality_score", 5)
-                  for h in sess["history"] if h.get("analysis")]
+        scores = [h["analysis"].get("quality_score", 5) for h in sess["history"] if h.get("analysis")]
         avg = round(sum(scores) / max(len(scores), 1), 1)
 
-        # Save interview to the database
-        db.save_interview(
-            user_id    = sess["user_id"],
-            job_role   = sess["job_role"],
-            experience = sess["experience"],
-            test_type  = sess["test_type"],
-            avg_score  = avg,
-            history    = sess["history"],
+        rubric_scores = []
+        for h in sess["history"]:
+            if h.get("analysis"):
+                rubric_scores.append({
+                    "topic": h.get("topic_name"),
+                    "question": h.get("question"),
+                    "quality_score": h["analysis"].get("quality_score", 5),
+                    "technical_accuracy": h["analysis"].get("technical_accuracy", 5),
+                    "problem_solving": h["analysis"].get("problem_solving", 5),
+                    "communication_clarity": h["analysis"].get("communication_clarity", 5),
+                    "evidence_grounding": h["analysis"].get("evidence_grounding", 5),
+                    "plagiarism_risk": h["analysis"].get("plagiarism_risk", "low"),
+                    "feedback": h["analysis"].get("rubric_feedback", "")
+                })
+
+        new_interview_id = db.save_interview(
+            user_id=sess["user_id"],
+            job_role=sess["job_role"],
+            experience=sess["experience"],
+            test_type=sess["test_type"],
+            avg_score=avg,
+            history=sess["history"],
+            match_id=sess.get("match_id"),
+            resume_id=sess.get("resume_id"),
+            jd_id=sess.get("jd_id"),
+            feedback=feedback,
+            rubric_scores=rubric_scores,
+            topics_evidence=sess.get("topics_evidence"),
+            weak_areas=feedback.get("weak_areas", []),
+            action_plan=feedback.get("action_plan_7_day", [])
         )
 
         return jsonify({
-            "transcription":    text,
-            "finished":         True,
-            "feedback":         feedback,
-            "avg_score":        avg,
-            "scores":           [h["analysis"].get("quality_score", 0) for h in sess["history"] if h.get("analysis")],
-            "plagiarism_risks":   [h["analysis"].get("plagiarism_risk", "low") for h in sess["history"] if h.get("analysis")],
-            "plagiarism_reasons": [h["analysis"].get("plagiarism_reason", "") for h in sess["history"] if h.get("analysis")],
-            "audio_url":          f"/audio/{audio_file}"
+            "transcription": text,
+            "finished": True,
+            "interview_id": new_interview_id,
+            "feedback": feedback,
+            "avg_score": avg,
+            "readiness_index": feedback.get("readiness_index", int(avg * 10)),
+            "rubric_scores": rubric_scores,
+            "audio_url": f"/audio/{audio_file}"
         })
 
-    # ── Next Question ─────────────────────────────────────────────────────────
-    next_q = analysis.get("next_question") or generate_question(sess)
-    sess["history"].append({"question": next_q, "answer": None, "analysis": None})
+    # Generate next topic question
+    next_topic = topics[next_topic_idx]
+    next_q_data = generate_rubric_question(sess, next_topic, is_followup=False)
 
-    # Speak acknowledgement + next question
-    ack        = analysis.get("brief_acknowledgement", "Thank you.")
-    q_index    = len(sess["history"])
-    audio_file = f"{session_id}_q{q_index}.mp3"
-    speak(f"{ack} {next_q}", audio_file)
+    sess["history"].append({
+        "question": next_q_data["question"],
+        "rubric": next_q_data.get("rubric", {}),
+        "topic_name": next_topic["topic_name"],
+        "topic_number": next_topic.get("topic_number", next_topic_idx + 1),
+        "topic_type": next_topic.get("topic_type", "core_claim"),
+        "evidence_reason": next_topic.get("evidence_reason", ""),
+        "is_followup": False,
+        "answer": None,
+        "analysis": None
+    })
+
+    q_idx = len(sess["history"])
+    audio_file = f"{session_id}_q{q_idx}.mp3"
+    ack = analysis.get("brief_acknowledgement", "Thank you.")
+    speak(f"{ack} Moving to Topic {next_topic_idx + 1}: {next_topic['topic_name']}. {next_q_data['question']}", audio_file)
 
     return jsonify({
         "transcription": text,
-        "finished":      False,
-        "next_question": next_q,
-        "question_num":  q_index,
-        "total_q":       sess["total_q"],
-        "difficulty":    sess["difficulty"],
-        "audio_url":     f"/audio/{audio_file}"
+        "finished": False,
+        "is_followup": False,
+        "rubric_feedback": analysis.get("rubric_feedback", ""),
+        "quality_score": analysis.get("quality_score", 5),
+        "technical_accuracy": analysis.get("technical_accuracy", 5),
+        "problem_solving": analysis.get("problem_solving", 5),
+        "communication_clarity": analysis.get("communication_clarity", 5),
+        "evidence_grounding": analysis.get("evidence_grounding", 5),
+        "next_question": next_q_data["question"],
+        "rubric": next_q_data.get("rubric", {}),
+        "topic_name": next_topic["topic_name"],
+        "evidence_reason": next_topic.get("evidence_reason", ""),
+        "question_num": next_topic_idx + 1,
+        "total_q": len(topics),
+        "audio_url": f"/audio/{audio_file}"
     })
+
 
 @app.route("/audio/<filename>")
 @login_required
@@ -541,7 +959,6 @@ def audio(filename):
         return jsonify({"error": "Not found"}), 404
     mime = "audio/mpeg" if filename.endswith(".mp3") else "audio/wav"
     return send_file(path, mimetype=mime)
-
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -594,45 +1011,75 @@ Be exhaustive — extract every technical skill, soft skill, tool, framework, la
         return {"role": "", "required_skills": [], "preferred_skills": [], "experience_required": ""}
 
 
-def run_match_engine(resume_data: dict, jd_data: dict) -> dict:
+def run_match_engine(resume_data: dict, jd_data: dict, resume_raw_text: str = "", jd_raw_text: str = "") -> dict:
     """
-    Use Groq LLM to compare resume against JD and produce a match report.
-    resume_data and jd_data are dicts with Python lists (already parsed from JSON).
+    Hybrid Match Engine:
+    1. NLP TF-IDF Cosine Similarity on raw text
+    2. Pandas structured skill gap & category analytics
+    3. Topic Selection with Verifiable Evidence Generator (5 topics)
+    4. LLM ATS Improvement Recommendations
     """
-    system = """You are an expert ATS (Applicant Tracking System) and senior career coach.
-Analyse the resume data versus the job description data and return ONLY valid JSON — no markdown.
-Schema:
-{
-  "match_score": <integer 0-100>,
-  "matched_skills":    ["skill that appears in both"],
-  "missing_skills":    ["required skill absent from resume"],
-  "improvement_areas": [
-    {"area": "Short title", "suggestion": "Specific, actionable 1-2 sentence advice"}
-  ]
-}
-Rules:
-- match_score: percentage of required JD skills found in resume (weighted by experience depth).
-- matched_skills: skills that appear in both the resume and the JD (required OR preferred).
-- missing_skills: required JD skills completely absent from resume.
-- improvement_areas: 3-5 concrete suggestions to close the gap or strengthen the application."""
+    # 1. TF-IDF Text Similarity
+    tfidf_result = compute_tfidf_similarity(resume_raw_text, jd_raw_text)
 
+    # 2. Pandas Skill Analytics
+    pandas_analytics = analyze_skills_with_pandas(resume_data, jd_data, tfidf_result)
+
+    # 3. Topic Selection with Evidence
+    topics_evidence = select_topics_with_evidence(resume_data, jd_data, pandas_analytics, num_topics=5)
+
+    # 4. LLM Improvement Recommendations
+    system = """You are an expert ATS (Applicant Tracking System) and senior placement director.
+Analyse the candidate's resume against the target Job Description.
+Provide 3-4 concrete, high-impact suggestions to strengthen their technical profile and interview readiness.
+Return ONLY valid JSON:
+{
+  "improvement_areas": [
+    {"area": "Short title", "suggestion": "Specific, actionable advice (1-2 sentences)"}
+  ]
+}"""
     user_payload = (
-        f"RESUME SKILLS: {json.dumps(resume_data.get('skills', []))}\n"
-        f"RESUME EXPERIENCE: {json.dumps(resume_data.get('experience', []))}\n"
-        f"RESUME EDUCATION: {json.dumps(resume_data.get('education', []))}\n"
-        f"RESUME PROJECTS: {json.dumps(resume_data.get('projects', []))}\n\n"
-        f"JD ROLE: {jd_data.get('role', '')}\n"
-        f"JD REQUIRED SKILLS: {json.dumps(jd_data.get('required_skills', []))}\n"
-        f"JD PREFERRED SKILLS: {json.dumps(jd_data.get('preferred_skills', []))}\n"
-        f"JD EXPERIENCE REQUIRED: {jd_data.get('experience_required', '')}"
+        f"Resume Skills: {json.dumps(resume_data.get('skills', []))}\n"
+        f"Resume Projects: {json.dumps(resume_data.get('projects', []))}\n"
+        f"Resume Experience: {json.dumps(resume_data.get('experience', []))}\n\n"
+        f"JD Role: {jd_data.get('role', '')}\n"
+        f"JD Required Skills: {json.dumps(jd_data.get('required_skills', []))}\n"
+        f"Missing Must-Have Skills: {json.dumps(pandas_analytics.get('missing_skills', []))}"
     )
 
-    raw = llm(system, user_payload, temperature=0.2)
-    raw = re.sub(r"```[a-z]*", "", raw).strip("` \n")
+    improvement_areas = []
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {"match_score": 0, "matched_skills": [], "missing_skills": [], "improvement_areas": []}
+        raw = llm(system, user_payload, temperature=0.3)
+        raw = re.sub(r"```[a-z]*", "", raw).strip("` \n")
+        parsed = json.loads(raw)
+        improvement_areas = parsed.get("improvement_areas", [])
+    except Exception as e:
+        print(f"[app.py] ATS improvement LLM fallback: {e}")
+        if pandas_analytics.get("missing_skills"):
+            improvement_areas.append({
+                "area": f"Close Gap in {pandas_analytics['missing_skills'][0]}",
+                "suggestion": f"Build a practical demonstration project showcasing {pandas_analytics['missing_skills'][0]} to satisfy target JD criteria."
+            })
+        improvement_areas.append({
+            "area": "Quantify Project Impact",
+            "suggestion": "Include concrete performance metrics (e.g. latency reduction, scale handled) in project bullet points."
+        })
+
+    return {
+        "match_score": pandas_analytics["overall_match_score"],
+        "tfidf_score": tfidf_result.get("similarity_percentage", 0.0),
+        "top_shared_terms": tfidf_result.get("top_shared_terms", []),
+        "matched_skills": pandas_analytics["matched_skills"],
+        "missing_skills": pandas_analytics["missing_skills"],
+        "missing_preferred": pandas_analytics.get("missing_preferred", []),
+        "bonus_skills": pandas_analytics.get("bonus_skills", []),
+        "must_have_rate": pandas_analytics["must_have_rate"],
+        "preferred_rate": pandas_analytics["preferred_rate"],
+        "category_breakdown": pandas_analytics.get("category_breakdown", []),
+        "topics_evidence": topics_evidence,
+        "improvement_areas": improvement_areas,
+        "analytics_breakdown": pandas_analytics
+    }
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -680,11 +1127,13 @@ def api_resume_upload():
         from resume_parser import parse_resume
         raw_text = parse_resume(filepath, ext)
     except Exception as exc:
-        os.remove(filepath)
+        if os.path.exists(filepath):
+            os.remove(filepath)
         return jsonify({"error": f"Could not parse file: {exc}"}), 500
 
     if not raw_text.strip():
-        os.remove(filepath)
+        if os.path.exists(filepath):
+            os.remove(filepath)
         return jsonify({"error": "No text could be extracted. Try a text-based PDF or DOCX."}), 400
 
     # LLM analysis
@@ -705,7 +1154,6 @@ def api_jd_analyze():
     """
     uid = session["user_id"]
 
-    # Support both JSON body and multipart upload
     if request.content_type and "multipart" in request.content_type:
         jd_file = request.files.get("jd_file")
         if not jd_file:
@@ -732,15 +1180,14 @@ def api_jd_analyze():
     return jsonify({"success": True, "jd_id": jd_id, "analysis": analysis})
 
 
-# ── Match Engine ──────────────────────────────────────────────────────────────
+# ── Match Engine Route ────────────────────────────────────────────────────────
 
 @app.route("/api/match", methods=["POST"])
 @login_required
 def api_match():
     """
-    Run the Resume × JD match engine.
-    Expects JSON: { resume_id, jd_id }
-    Returns: match_score, matched_skills, missing_skills, improvement_areas
+    Run the Hybrid Resume × JD match engine:
+    TF-IDF Similarity + Pandas Analytics + Evidence-Based Topic Selection.
     """
     data      = request.get_json() or {}
     resume_id = data.get("resume_id")
@@ -750,7 +1197,6 @@ def api_match():
         return jsonify({"error": "Both resume_id and jd_id are required"}), 400
 
     uid = session["user_id"]
-
     resume_row = db.get_resume_by_id(resume_id, uid)
     jd_row     = db.get_jd_by_id(jd_id, uid)
 
@@ -773,16 +1219,27 @@ def api_match():
         "experience_required": jd_row["experience_required"],
     }
 
-    result   = run_match_engine(resume_data, jd_data)
+    result   = run_match_engine(
+        resume_data, jd_data,
+        resume_raw_text=resume_row.get("raw_text", ""),
+        jd_raw_text=jd_row.get("jd_text", "")
+    )
     match_id = db.save_match(uid, resume_id, jd_id, result)
 
     return jsonify({
-        "success":           True,
-        "match_id":          match_id,
-        "match_score":       result["match_score"],
-        "matched_skills":    result["matched_skills"],
-        "missing_skills":    result["missing_skills"],
-        "improvement_areas": result["improvement_areas"],
+        "success":            True,
+        "match_id":           match_id,
+        "match_score":        result["match_score"],
+        "tfidf_score":        result["tfidf_score"],
+        "matched_skills":     result["matched_skills"],
+        "missing_skills":     result["missing_skills"],
+        "missing_preferred":  result.get("missing_preferred", []),
+        "bonus_skills":       result.get("bonus_skills", []),
+        "must_have_rate":     result["must_have_rate"],
+        "preferred_rate":     result["preferred_rate"],
+        "category_breakdown": result.get("category_breakdown", []),
+        "topics_evidence":    result["topics_evidence"],
+        "improvement_areas":  result["improvement_areas"],
     })
 
 
@@ -828,6 +1285,56 @@ def api_jd_load(jd_id):
     }
     return jsonify({"success": True, "jd_id": jd_id,
                     "jd_text": row.get("jd_text", ""), "analysis": analysis})
+
+
+# ── Load Match Details for Interview ──────────────────────────────────────
+
+@app.route("/api/match/<int:match_id>")
+@login_required
+def api_match_details(match_id):
+    """Return match details including topic blueprint and skill analytics."""
+    uid = session["user_id"]
+    match = db.get_match_by_id(match_id, uid)
+    if not match:
+        return jsonify({"error": "Match not found"}), 404
+    return jsonify({"success": True, "match": match})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRACTICE REPORT & TRENDS ROUTES
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/report/<int:interview_id>")
+@login_required
+def practice_report_page(interview_id):
+    """Render full auditable Practice Report page."""
+    uid = session["user_id"]
+    report = db.get_interview_report(interview_id, uid)
+    if not report:
+        flash("Practice report not found.", "error")
+        return redirect(url_for("user_dashboard"))
+    return render_template("practice_report.html", report=report)
+
+
+@app.route("/api/report/<int:interview_id>")
+@login_required
+def api_get_report(interview_id):
+    """JSON endpoint for practice report audit data."""
+    uid = session["user_id"]
+    report = db.get_interview_report(interview_id, uid)
+    if not report:
+        return jsonify({"error": "Report not found"}), 404
+    return jsonify({"success": True, "report": report})
+
+
+@app.route("/api/trends")
+@login_required
+def api_user_trends():
+    """Return user performance progression and frequent weak area analytics."""
+    uid = session["user_id"]
+    trends = db.get_user_performance_trends(uid)
+    return jsonify({"success": True, "trends": trends})
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

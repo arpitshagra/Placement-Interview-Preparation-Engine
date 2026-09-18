@@ -1,0 +1,667 @@
+{% extends "base.html" %}
+{% block title %}Practice Report — {{ report.job_role }} — IntervIQ{% endblock %}
+{% block extra_head %}
+<style>
+  :root {
+    --brand-primary: #1c1c1a;
+    --accent-blue: #0969da;
+    --card-bg: #ffffff;
+    --border-color: #e4e4e2;
+  }
+
+  .report-container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding-bottom: 4rem;
+  }
+
+  /* Header Section */
+  .report-header {
+    background: linear-gradient(135deg, #1c1c1a 0%, #2e2e2b 100%);
+    color: #ffffff;
+    border-radius: 12px;
+    padding: 2rem 2.2rem;
+    margin-bottom: 1.5rem;
+    position: relative;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  }
+
+  .report-header .meta-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(8px);
+    padding: 0.25rem 0.7rem;
+    border-radius: 99px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 0.8rem;
+  }
+
+  .report-header h1 {
+    font-size: 1.65rem;
+    font-weight: 700;
+    margin-bottom: 0.4rem;
+    color: #fff;
+  }
+
+  .report-header p.subtitle {
+    color: #c4c4c0;
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+
+  .report-actions {
+    display: flex;
+    gap: 0.6rem;
+    margin-top: 1.2rem;
+    flex-wrap: wrap;
+  }
+
+  .btn-light {
+    background: #ffffff;
+    color: #1c1c1a;
+    border: none;
+    font-weight: 600;
+  }
+  .btn-light:hover { background: #f0f0ee; }
+
+  .btn-ghost-light {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+  }
+  .btn-ghost-light:hover { background: rgba(255, 255, 255, 0.2); }
+
+  /* Readiness & Dimensions Section */
+  .grid-executive {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+  @media (max-width: 780px) {
+    .grid-executive { grid-template-columns: 1fr; }
+  }
+
+  .score-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.6rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .score-gauge {
+    position: relative;
+    width: 140px;
+    height: 140px;
+    margin-bottom: 1rem;
+  }
+
+  .score-gauge svg {
+    transform: rotate(-90deg);
+    width: 140px;
+    height: 140px;
+  }
+
+  .score-gauge circle.bg {
+    fill: none;
+    stroke: #eee;
+    stroke-width: 10;
+  }
+
+  .score-gauge circle.progress {
+    fill: none;
+    stroke: var(--green);
+    stroke-width: 10;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s ease;
+  }
+
+  .score-gauge .gauge-val {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.8rem;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .score-gauge .gauge-val small {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--muted);
+  }
+
+  /* 4 Dimensions Grid */
+  .dimension-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem;
+  }
+  @media (max-width: 500px) {
+    .dimension-grid { grid-template-columns: 1fr; }
+  }
+
+  .dim-card {
+    background: var(--bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem 1.1rem;
+  }
+  .dim-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.35rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .dim-val {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .dim-bar {
+    height: 6px;
+    background: #e0e0de;
+    border-radius: 99px;
+    overflow: hidden;
+    margin-top: 0.5rem;
+  }
+  .dim-bar-fill {
+    height: 100%;
+    border-radius: 99px;
+    background: var(--accent);
+  }
+
+  /* Card Containers */
+  .section-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .section-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  /* Topics Blueprint Grid */
+  .topic-blueprint-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.85rem;
+  }
+  .topic-bp-card {
+    background: var(--bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .topic-bp-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.4rem;
+  }
+  .topic-bp-title {
+    font-size: 0.88rem;
+    font-weight: 600;
+  }
+  .topic-bp-evidence {
+    font-size: 0.78rem;
+    color: #4a5568;
+    line-height: 1.4;
+    margin-top: 0.4rem;
+    background: rgba(255, 255, 255, 0.7);
+    padding: 0.45rem 0.6rem;
+    border-radius: 6px;
+    border-left: 3px solid #3182ce;
+  }
+
+  /* Q&A Audit Items */
+  .audit-item {
+    border: 1px solid var(--border-color);
+    border-radius: 9px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+    background: var(--card-bg);
+  }
+  .audit-header {
+    background: #fbfbfa;
+    padding: 0.85rem 1.1rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+  .audit-body {
+    padding: 1.1rem;
+  }
+  .audit-q {
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.5;
+    margin-bottom: 0.7rem;
+  }
+  .audit-ans {
+    background: var(--bg);
+    padding: 0.85rem 1rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    color: #2d3748;
+    font-style: italic;
+    margin-bottom: 0.85rem;
+    border-left: 3px solid #718096;
+  }
+  .audit-feedback {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    font-size: 0.83rem;
+    line-height: 1.5;
+    color: #166534;
+    margin-bottom: 0.75rem;
+  }
+  .audit-rubric-dims {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    margin-top: 0.7rem;
+    background: #fafaf9;
+    padding: 0.6rem 0.8rem;
+    border-radius: 6px;
+  }
+  @media (max-width: 600px) {
+    .audit-rubric-dims { grid-template-columns: 1fr 1fr; }
+  }
+  .audit-dim-item {
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+  .audit-dim-item strong {
+    display: block;
+    font-size: 0.88rem;
+    color: var(--text);
+  }
+
+  /* 7 Day Action Plan */
+  .plan-timeline {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 0.85rem;
+  }
+  .plan-card {
+    background: var(--bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.1rem;
+    position: relative;
+  }
+  .plan-day {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #3182ce;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.3rem;
+  }
+  .plan-focus {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.45rem;
+  }
+  .plan-task {
+    font-size: 0.8rem;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  /* Print Styles */
+  @media print {
+    nav, .report-actions, .no-print { display: none !important; }
+    body { background: #ffffff !important; color: #000000 !important; }
+    .report-container { max-width: 100% !important; padding: 0 !important; }
+    .report-header { background: #222 !important; color: #fff !important; -webkit-print-color-adjust: exact; }
+    .section-card { border: 1px solid #ccc !important; break-inside: avoid; }
+    .audit-item { break-inside: avoid; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="report-container">
+
+  <!-- Header -->
+  <div class="report-header">
+    <div class="meta-badge">
+      <span>🛡️ Auditable Practice Report</span>
+      <span>·</span>
+      <span>Session #{{ report.id }}</span>
+    </div>
+    <h1>{{ report.job_role }}</h1>
+    <p class="subtitle">
+      Candidate Technical Placement Evaluation · Experience: {{ report.experience | capitalize }} · Completed on {{ report.created_at[:10] }}
+    </p>
+
+    <div class="report-actions no-print">
+      <button class="btn btn-light" onclick="window.print()">🖨️ Print / Save as PDF</button>
+      <a href="{{ url_for('interview_page') }}" class="btn btn-ghost-light">🔄 Retake Interview</a>
+      <a href="{{ url_for('user_dashboard') }}" class="btn btn-ghost-light">← Dashboard</a>
+    </div>
+  </div>
+
+  <!-- Executive Summary & Dimensions -->
+  <div class="grid-executive">
+    <!-- Score Gauge -->
+    <div class="score-card">
+      <span class="lbl" style="margin-bottom: 0.8rem;">Placement Readiness Index</span>
+      {% set readiness = report.feedback.readiness_index or ((report.avg_score or 5) * 10) | int %}
+      <div class="score-gauge">
+        <svg viewBox="0 0 140 140">
+          <circle class="bg" cx="70" cy="70" r="55"></circle>
+          <circle class="progress" cx="70" cy="70" r="55"
+                  stroke-dasharray="345.5"
+                  stroke-dashoffset="{{ 345.5 - (345.5 * readiness / 100) }}"
+                  stroke="{{ '#1a7f37' if readiness >= 75 else '#9a6700' if readiness >= 50 else '#cf222e' }}">
+          </circle>
+        </svg>
+        <div class="gauge-val" style="color: {{ '#1a7f37' if readiness >= 75 else '#9a6700' if readiness >= 50 else '#cf222e' }};">
+          {{ readiness }}%
+          <br><small>{{ 'READY' if readiness >= 75 else 'COMPETENT' if readiness >= 50 else 'IMPROVEMENT NEEDED' }}</small>
+        </div>
+      </div>
+      <div style="font-size: 0.95rem; font-weight: 600; margin-top: 0.4rem;">
+        Session Score: {{ report.avg_score or '—' }} / 10
+      </div>
+    </div>
+
+    <!-- Director Review & 4 Dimensions -->
+    <div class="section-card" style="margin-bottom: 0; display: flex; flex-direction: column; justify-content: space-between;">
+      <div>
+        <span class="lbl">Director's Evaluation Statement</span>
+        <p style="font-size: 0.88rem; line-height: 1.6; color: #333; margin-bottom: 1.2rem;">
+          {{ report.feedback.spoken_summary or "The candidate completed an adaptive technical interview covering core claims, system scalability, and technical resiliency." }}
+        </p>
+      </div>
+
+      <div>
+        <span class="lbl">Core Performance Dimensions</span>
+        {% set dims = report.feedback.dimension_averages or {} %}
+        <div class="dimension-grid">
+          <div class="dim-card">
+            <div class="dim-title">
+              <span>Technical Accuracy</span>
+              <span>{{ dims.technical_accuracy or (report.avg_score or 5.0) }}/10</span>
+            </div>
+            <div class="dim-bar">
+              <div class="dim-bar-fill" style="width: {{ ((dims.technical_accuracy or (report.avg_score or 5.0)) * 10) }}%; background: var(--green);"></div>
+            </div>
+          </div>
+
+          <div class="dim-card">
+            <div class="dim-title">
+              <span>Problem Solving</span>
+              <span>{{ dims.problem_solving or (report.avg_score or 5.0) }}/10</span>
+            </div>
+            <div class="dim-bar">
+              <div class="dim-bar-fill" style="width: {{ ((dims.problem_solving or (report.avg_score or 5.0)) * 10) }}%; background: #0969da;"></div>
+            </div>
+          </div>
+
+          <div class="dim-card">
+            <div class="dim-title">
+              <span>Communication Clarity</span>
+              <span>{{ dims.communication_clarity or (report.avg_score or 5.0) }}/10</span>
+            </div>
+            <div class="dim-bar">
+              <div class="dim-bar-fill" style="width: {{ ((dims.communication_clarity or (report.avg_score or 5.0)) * 10) }}%; background: #8250df;"></div>
+            </div>
+          </div>
+
+          <div class="dim-card">
+            <div class="dim-title">
+              <span>Evidence Grounding</span>
+              <span>{{ dims.evidence_grounding or (report.avg_score or 5.0) }}/10</span>
+            </div>
+            <div class="dim-bar">
+              <div class="dim-bar-fill" style="width: {{ ((dims.evidence_grounding or (report.avg_score or 5.0)) * 10) }}%; background: #bf8700;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resume & Match Context (if linked) -->
+  {% if report.match_data %}
+  <div class="section-card">
+    <div class="section-title">
+      <span>🎯 Resume Claims × Job Description Match Context</span>
+    </div>
+    <div class="grid2" style="margin-bottom: 1rem;">
+      <div style="background: var(--bg); padding: 0.9rem 1.1rem; border-radius: 8px;">
+        <span class="lbl">Match Analytics</span>
+        <div style="font-size: 1.15rem; font-weight: 700; margin-top: 0.2rem;">
+          {{ report.match_data.match_score }}% <span style="font-size: 0.8rem; font-weight: 500; color: var(--muted);">(NLP TF-IDF Similarity: {{ report.match_data.tfidf_score }}%)</span>
+        </div>
+      </div>
+      <div style="background: var(--bg); padding: 0.9rem 1.1rem; border-radius: 8px;">
+        <span class="lbl">Target Position</span>
+        <div style="font-size: 1rem; font-weight: 600; margin-top: 0.2rem;">
+          {{ report.match_data.role or report.job_role }}
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <span class="lbl">Matched Resume Skills</span>
+      <div class="row" style="margin-bottom: 0.8rem;">
+        {% for s in report.match_data.matched_skills %}
+          <span class="pill pill-pos">✓ {{ s }}</span>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if report.match_data.missing_skills %}
+    <div>
+      <span class="lbl">Missing / Targeted Skill Gaps</span>
+      <div class="row">
+        {% for s in report.match_data.missing_skills %}
+          <span class="pill pill-neg">✗ {{ s }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Topic Selection Blueprint with Evidence -->
+  {% if report.topics_evidence %}
+  <div class="section-card">
+    <div class="section-title">
+      <span>📋 Topic Selection Engine Blueprint (Evidence Grounded)</span>
+    </div>
+    <p class="muted" style="margin-bottom: 1rem; font-size: 0.82rem;">
+      The 5 interview topics were dynamically chosen based on explicit links between the candidate's resume claims and role requirements:
+    </p>
+    <div class="topic-blueprint-grid">
+      {% for t in report.topics_evidence %}
+      <div class="topic-bp-card">
+        <div>
+          <div class="topic-bp-head">
+            <span class="topic-bp-title">Topic {{ t.topic_number }}: {{ t.topic_name }}</span>
+            <span class="pill pill-neu" style="font-size: 0.6rem;">{{ t.topic_type | replace('_', ' ') | capitalize }}</span>
+          </div>
+          <div style="font-size: 0.78rem; color: var(--muted); margin-bottom: 0.3rem;">Focus: {{ t.focus_area }}</div>
+        </div>
+        <div class="topic-bp-evidence">
+          <strong>Why chosen:</strong> {{ t.evidence_reason }}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Question by Question Audit Log -->
+  <div class="section-card">
+    <div class="section-title">
+      <span>🔍 Detailed Question & Answer Evaluation Audit Log</span>
+    </div>
+    <p class="muted" style="margin-bottom: 1.2rem; font-size: 0.82rem;">
+      Each candidate response was evaluated against the 4-dimension scoring rubric with adaptive follow-up tracking:
+    </p>
+
+    {% for h in report.history %}
+    <div class="audit-item">
+      <div class="audit-header">
+        <div>
+          <strong style="font-size: 0.88rem;">Question {{ loop.index }}: {{ h.topic_name or 'Technical Concept' }}</strong>
+          {% if h.is_followup %}
+            <span class="pill pill-hard" style="margin-left: 0.4rem;">🎯 ADAPTIVE FOLLOW-UP PROBE</span>
+          {% endif %}
+        </div>
+        <div>
+          {% if h.analysis %}
+            <span style="font-weight: 700; font-size: 0.9rem; color: {{ 'var(--green)' if (h.analysis.quality_score or 5) >= 7 else 'var(--amber)' if (h.analysis.quality_score or 5) >= 5 else 'var(--red)' }};">
+              Score: {{ h.analysis.quality_score or 5 }}/10
+            </span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="audit-body">
+        {% if h.evidence_reason %}
+          <div style="font-size: 0.76rem; color: var(--muted); margin-bottom: 0.5rem;">
+            <strong>Topic Evidence:</strong> {{ h.evidence_reason }}
+          </div>
+        {% endif %}
+
+        <div class="audit-q">
+          {{ h.question }}
+        </div>
+
+        {% if h.rubric and h.rubric.expected_concepts %}
+        <div style="font-size: 0.76rem; color: #4b5563; background: #f3f4f6; padding: 0.4rem 0.6rem; border-radius: 5px; margin-bottom: 0.6rem;">
+          <strong>Expected Criteria:</strong> {{ h.rubric.expected_concepts | join(', ') }}
+        </div>
+        {% endif %}
+
+        <span class="lbl" style="margin-bottom: 0.3rem;">Candidate Answer</span>
+        <div class="audit-ans">
+          "{{ h.answer or 'No answer recorded.' }}"
+        </div>
+
+        {% if h.analysis %}
+          {% if h.analysis.rubric_feedback %}
+          <div class="audit-feedback">
+            <strong>Evaluator Feedback:</strong> {{ h.analysis.rubric_feedback }}
+          </div>
+          {% endif %}
+
+          <div class="audit-rubric-dims">
+            <div class="audit-dim-item">
+              Technical Accuracy
+              <strong>{{ h.analysis.technical_accuracy or h.analysis.quality_score or 5 }}/10</strong>
+            </div>
+            <div class="audit-dim-item">
+              Problem Solving
+              <strong>{{ h.analysis.problem_solving or h.analysis.quality_score or 5 }}/10</strong>
+            </div>
+            <div class="audit-dim-item">
+              Clarity
+              <strong>{{ h.analysis.communication_clarity or h.analysis.quality_score or 5 }}/10</strong>
+            </div>
+            <div class="audit-dim-item">
+              Grounding / Depth
+              <strong>{{ h.analysis.evidence_grounding or h.analysis.quality_score or 5 }}/10</strong>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Diagnosed Weak Areas & Strengths -->
+  <div class="grid2" style="margin-bottom: 1.5rem;">
+    <div class="section-card" style="margin-bottom: 0; border-top: 3px solid var(--green);">
+      <div class="section-title" style="color: var(--green);">
+        <span>💪 Validated Strengths</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 0.6rem;">
+        {% for s in report.feedback.strong_points %}
+          <div style="background: var(--bg); padding: 0.7rem 0.9rem; border-radius: 6px; font-size: 0.84rem; line-height: 1.45;">
+            ✓ {{ s }}
+          </div>
+        {% else %}
+          <p class="muted">Solid technical baseline shown across session topics.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="section-card" style="margin-bottom: 0; border-top: 3px solid var(--red);">
+      <div class="section-title" style="color: var(--red);">
+        <span>⚠️ Diagnosed Weak Areas & Gaps</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 0.6rem;">
+        {% for w in report.feedback.weak_areas %}
+          <div style="background: var(--bg); padding: 0.7rem 0.9rem; border-radius: 6px; font-size: 0.84rem; line-height: 1.45;">
+            ✗ {{ w }}
+          </div>
+        {% else %}
+          <p class="muted">No critical blockers identified.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- 7-Day Targeted Preparation Action Plan -->
+  {% if report.feedback.action_plan_7_day %}
+  <div class="section-card">
+    <div class="section-title">
+      <span>🚀 7-Day Targeted Preparation & Action Plan</span>
+    </div>
+    <p class="muted" style="margin-bottom: 1.1rem; font-size: 0.82rem;">
+      Step-by-step roadmap to eliminate identified technical gaps prior to final placement interviews:
+    </p>
+    <div class="plan-timeline">
+      {% for p in report.feedback.action_plan_7_day %}
+      <div class="plan-card">
+        <div class="plan-day">{{ p.day }}</div>
+        <div class="plan-focus">{{ p.focus }}</div>
+        <div class="plan-task">{{ p.task }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

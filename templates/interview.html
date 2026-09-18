@@ -1,69 +1,420 @@
 {% extends "base.html" %}
-{% block title %}Interview — Interview Bot{% endblock %}
+{% block title %}Adaptive Interview — Upload Resume & JD — IntervIQ{% endblock %}
 {% block extra_head %}
 <style>
-  /* When feedback is shown, expand the page wrapper to use all available width */
   body.feedback-mode .page {
     max-width: 100%;
     padding-left: 1.5rem;
     padding-right: 1.5rem;
   }
+
+  /* ── Upload Screen ─────────────────────────────────────────────────────── */
+  .upload-screen { max-width: 680px; margin: 0 auto; }
+
+  .upload-hero {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+  .upload-hero h1 {
+    font-size: 1.45rem;
+    font-weight: 800;
+    margin-bottom: 0.5rem;
+  }
+  .upload-hero p { font-size: 0.88rem; color: var(--muted); line-height: 1.6; }
+
+  .steps-row {
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    margin-bottom: 2rem;
+  }
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .step-item .step-num {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--text);
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .step-arrow {
+    color: var(--border);
+    font-size: 1rem;
+    margin: 0 0.5rem;
+  }
+
+  /* Drop Zone */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 2rem 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    background: var(--bg);
+    position: relative;
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--text);
+    background: #f0f0ee;
+  }
+  .drop-zone input[type=file] {
+    position: absolute; inset: 0; opacity: 0;
+    cursor: pointer; width: 100%; height: 100%;
+  }
+  .drop-zone .drop-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+  .drop-zone .drop-label { font-size: 0.88rem; font-weight: 600; }
+  .drop-zone .drop-hint  { font-size: 0.74rem; color: var(--muted); margin-top: 0.2rem; }
+  .drop-zone.has-file { border-color: var(--green); background: #f0fff4; }
+  .drop-zone.has-file .drop-icon { filter: grayscale(0); }
+
+  .file-chosen {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-size: 0.8rem; font-weight: 600; color: var(--green);
+    background: #dcfce7; padding: 0.3rem 0.75rem;
+    border-radius: 99px; margin-top: 0.5rem;
+  }
+
+  /* Analysis Loading Overlay */
+  .analysis-overlay {
+    position: fixed; inset: 0;
+    background: rgba(28, 28, 26, 0.92);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 9999; color: #fff;
+    gap: 1.2rem;
+  }
+  .analysis-spinner {
+    width: 52px; height: 52px;
+    border: 4px solid rgba(255,255,255,0.2);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .analysis-steps {
+    display: flex; flex-direction: column; gap: 0.5rem; text-align: left;
+    min-width: 260px;
+  }
+  .analysis-step {
+    display: flex; align-items: center; gap: 0.7rem;
+    font-size: 0.88rem; opacity: 0.4; transition: opacity 0.4s;
+  }
+  .analysis-step.active { opacity: 1; }
+  .analysis-step.done   { opacity: 0.6; }
+  .analysis-step .step-icon { font-size: 1rem; width: 1.5rem; text-align: center; }
+
+  /* Match Preview Banner (shown between upload and interview) */
+  .match-banner {
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    color: #fff;
+    border-radius: 12px;
+    padding: 1.4rem 1.6rem;
+    margin-bottom: 1.2rem;
+    animation: fadeIn 0.4s ease-in-out;
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+
+  .match-banner-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: #60a5fa;
+    margin-bottom: 0.4rem;
+  }
+  .match-banner-role {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 0.8rem;
+  }
+  .match-stats {
+    display: flex; gap: 1.2rem; flex-wrap: wrap; margin-bottom: 0.8rem;
+  }
+  .match-stat {
+    font-size: 0.78rem; color: #94a3b8;
+    display: flex; flex-direction: column; gap: 0.1rem;
+  }
+  .match-stat strong { font-size: 1.05rem; color: #fff; font-weight: 700; }
+
+  .skill-pills { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+  .skill-match { background: #22c55e20; color: #86efac; border: 1px solid #22c55e40; font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 99px; }
+  .skill-miss  { background: #ef444420; color: #fca5a5; border: 1px solid #ef444440; font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 99px; }
+
+  /* Topic Blueprint (collapsible) */
+  .topics-preview {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 1.2rem;
+    overflow: hidden;
+  }
+  .topics-preview summary {
+    padding: 0.85rem 1.2rem;
+    font-size: 0.86rem;
+    font-weight: 600;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f8f9fa;
+  }
+  .topics-preview summary::-webkit-details-marker { display: none; }
+  .topics-preview summary::after { content: "▼"; font-size: 0.65rem; color: var(--muted); }
+  .topics-preview[open] summary::after { content: "▲"; }
+  .topic-row {
+    display: flex;
+    gap: 0.7rem;
+    padding: 0.75rem 1.2rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.82rem;
+    align-items: flex-start;
+  }
+  .topic-num {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--text);
+    color: #fff;
+    font-size: 0.68rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+  }
+  .topic-name { font-weight: 600; }
+  .topic-evidence { font-size: 0.75rem; color: var(--muted); margin-top: 0.15rem; line-height: 1.4; }
+
+  /* ── Interview Screen ──────────────────────────────────────────────────── */
+  .topic-evidence-banner {
+    background: #f0f7ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    padding: 0.8rem 1rem;
+    margin-bottom: 0.85rem;
+  }
+  .topic-evidence-header {
+    display: flex; justify-content: space-between;
+    align-items: center; flex-wrap: wrap; gap: 0.4rem;
+  }
+  .topic-evidence-title { font-size: 0.86rem; font-weight: 700; color: #1e40af; }
+  .topic-evidence-why   { font-size: 0.78rem; color: #3b82f6; line-height: 1.4; margin-top: 0.3rem; }
+
+  .followup-alert {
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 8px;
+    padding: 0.65rem 0.9rem;
+    font-size: 0.8rem; color: #9a3412; font-weight: 600;
+    margin-bottom: 0.85rem;
+    display: flex; align-items: center; gap: 0.5rem;
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  .rubric-live-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 0.4rem; margin-top: 0.7rem;
+    background: var(--bg); padding: 0.6rem 0.8rem; border-radius: 6px;
+  }
+  @media(max-width: 500px) { .rubric-live-grid { grid-template-columns: 1fr 1fr; } }
+  .rubric-live-cell { font-size: 0.72rem; color: var(--muted); }
+  .rubric-live-cell strong { display: block; font-size: 0.86rem; color: var(--text); }
+
+  .mic-ring {
+    width: 62px; height: 62px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--white);
+    font-size: 1.45rem; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .mic-ring:hover:not(:disabled) { border-color: #aaa; }
+  .mic-ring:disabled { opacity: .4; cursor: not-allowed; }
+  .mic-ring.listening {
+    border-color: var(--red);
+    box-shadow: 0 0 0 5px rgba(207,34,46,.1);
+    animation: pulse 1.3s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100%{ box-shadow: 0 0 0 5px rgba(207,34,46,.1); }
+    50%    { box-shadow: 0 0 0 12px rgba(207,34,46,.02); }
+  }
+  .chip { font-size: .68rem; font-weight: 500; padding: .18rem .55rem; border-radius: 99px; border: 1px solid var(--border); background: var(--bg); color: var(--muted); }
+  .chip.pos { color: var(--green); border-color: var(--green); background: #f0fff4; }
+  .chip.neg { color: var(--red);   border-color: var(--red);   background: #fff5f5; }
+  .chip.neu { color: var(--amber); border-color: var(--amber); background: #fffbea; }
+
+  .dots { display: inline-flex; gap: 3px; vertical-align: middle; margin-right: 4px; }
+  .dots span { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); animation: db .9s ease-in-out infinite; }
+  .dots span:nth-child(2) { animation-delay: .15s; }
+  .dots span:nth-child(3) { animation-delay: .3s; }
+  @keyframes db { 0%,60%,100%{ transform: translateY(0); } 30%{ transform: translateY(-5px); } }
+
+  .feedback-item { background: var(--bg); border-radius: 6px; padding: .6rem .8rem; font-size: .84rem; display: flex; align-items: flex-start; gap: .6rem; line-height: 1.4; }
+  .feedback-item .icon { font-weight: bold; flex-shrink: 0; }
+  .feedback-item.pos .icon { color: var(--green); }
+  .feedback-item.neg .icon { color: var(--red); }
+  .feedback-item.neu .icon { color: var(--amber); }
+
+  .qb-row { display: flex; align-items: center; gap: .8rem; font-size: .82rem; }
+  .qb-label { color: var(--muted); width: 22px; text-align: right; flex-shrink: 0; }
+  .qb-bar-bg { flex: 1; height: 8px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+  .qb-bar-fill { height: 100%; border-radius: 99px; transition: width .6s ease-out; }
+  .qb-score { width: 34px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; font-size: .78rem; flex-shrink: 0; }
+
+  #feedbackScreen.fb-root { width: 100%; }
+  .fb-row-top { display: grid; grid-template-columns: 1fr 1fr; gap: .85rem; margin-bottom: .85rem; }
+  .fb-card-summary, .fb-card-breakdown { margin-bottom: 0; }
+  .fb-row-bottom { display: grid !important; grid-template-columns: 1fr 1fr 1fr; gap: .85rem; }
+  .fb-col { margin-bottom: 0; }
+  .fb-score-ring { width: 70px; height: 70px; border-radius: 50%; border: 2px solid var(--text); display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0; }
+  @media (max-width: 720px) { .fb-row-top { grid-template-columns: 1fr; } .fb-row-bottom { grid-template-columns: 1fr; } }
+  @media (min-width: 721px) and (max-width: 960px) { .fb-row-bottom { grid-template-columns: 1fr 1fr; } }
+
+  .plag-badge { display: inline-block; font-size: .67rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: .2rem .6rem; border-radius: 99px; border: 1px solid; }
+  .plag-low    { color: var(--green); border-color: var(--green); background: #f0fff4; }
+  .plag-medium { color: var(--amber); border-color: var(--amber); background: #fffbea; }
+  .plag-high   { color: var(--red);   border-color: var(--red);   background: #fff5f5; }
+  .plag-row { background: var(--bg); border-radius: 7px; padding: .55rem .75rem; display: flex; align-items: center; justify-content: space-between; gap: .5rem; font-size: .82rem; }
 </style>
 {% endblock %}
+
 {% block content %}
 
-<!-- Setup Screen -->
-<div id="setupScreen" style="max-width:540px;margin:0 auto;">
-  <div style="margin-bottom:1.5rem;">
-    <h2 style="font-size:1rem;font-weight:600;">Configure Interview</h2>
-    <p class="muted">Answers are saved automatically when you finish.</p>
+<!-- ═══════════════════════════════ UPLOAD SCREEN ════════════════════════════ -->
+<div id="uploadScreen" class="upload-screen">
+
+  <div class="upload-hero">
+    <h1>Adaptive Placement Interview</h1>
+    <p>Upload your <strong>Resume</strong> and paste your <strong>Job Description</strong>.<br>
+    AI will analyse them and instantly create a personalised 5-topic adaptive interview grounded in your actual skills and gaps.</p>
   </div>
 
-  <div class="card">
-    <div class="field">
-      <label>Job Role</label>
-      <input type="text" id="jobRole" placeholder="e.g. Backend Engineer, Data Scientist" value="Software Engineer"/>
+  <div class="steps-row">
+    <div class="step-item"><span class="step-num">1</span> Upload Resume + JD</div>
+    <span class="step-arrow">→</span>
+    <div class="step-item"><span class="step-num">2</span> AI Analyses in ~20s</div>
+    <span class="step-arrow">→</span>
+    <div class="step-item"><span class="step-num">3</span> Adaptive Interview Begins</div>
+  </div>
+
+  <form id="uploadForm">
+    <!-- Resume Upload -->
+    <div class="card" style="margin-bottom: 0.85rem; padding: 1.2rem 1.5rem;">
+      <span class="lbl">📄 Resume File (PDF or DOCX)</span>
+      <div class="drop-zone" id="resumeDropZone">
+        <input type="file" id="resumeFile" accept=".pdf,.docx" onchange="handleResumeFile(this)">
+        <div class="drop-icon">📂</div>
+        <div class="drop-label">Click to browse or drag & drop</div>
+        <div class="drop-hint">Supports PDF and DOCX · Max 10 MB</div>
+        <div id="resumeChosen" style="display:none;">
+          <span class="file-chosen">✓ <span id="resumeFileName"></span></span>
+        </div>
+      </div>
     </div>
-    <div class="grid2">
-      <div class="field">
-        <label>Experience Level</label>
+
+    <!-- JD Input -->
+    <div class="card" style="margin-bottom: 0.85rem; padding: 1.2rem 1.5rem;">
+      <span class="lbl">💼 Job Description</span>
+      <div style="display: flex; gap: 0.6rem; margin-bottom: 0.7rem; flex-wrap: wrap;">
+        <button type="button" class="btn btn-sm" id="tabPaste"   onclick="switchJdTab('paste')"   style="background:var(--text);color:#fff;border-color:var(--text);">Paste Text</button>
+        <button type="button" class="btn btn-sm" id="tabFile"    onclick="switchJdTab('file')">Upload File</button>
+      </div>
+
+      <div id="jdPastePanel">
+        <textarea id="jdText" placeholder="Paste the full job description here…" style="min-height:130px;font-size:0.83rem;"></textarea>
+      </div>
+      <div id="jdFilePanel" style="display:none;">
+        <div class="drop-zone" id="jdDropZone">
+          <input type="file" id="jdFile" accept=".pdf,.docx,.txt" onchange="handleJdFile(this)">
+          <div class="drop-icon">📋</div>
+          <div class="drop-label">Click to browse JD file</div>
+          <div class="drop-hint">Supports PDF, DOCX, TXT</div>
+          <div id="jdChosen" style="display:none;">
+            <span class="file-chosen">✓ <span id="jdFileName"></span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Experience Level -->
+    <div class="card" style="margin-bottom: 1.2rem; padding: 1.2rem 1.5rem;">
+      <div class="field" style="margin-bottom:0;">
+        <label>Your Experience Level</label>
         <select id="experience">
-          <option value="junior">Junior (0–2 yrs)</option>
-          <option value="mid" selected>Mid (2–5 yrs)</option>
-          <option value="senior">Senior (5+ yrs)</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Test Type</label>
-        <select id="testType">
-          <option value="technical">Technical</option>
-          <option value="hr">HR / Behavioural</option>
-          <option value="mixed" selected>Mixed</option>
-          <option value="system design">System Design</option>
-          <option value="data structures">DSA</option>
+          <option value="junior">Junior (0–2 years)</option>
+          <option value="mid" selected>Mid-level (2–5 years)</option>
+          <option value="senior">Senior (5+ years)</option>
         </select>
       </div>
     </div>
-    <div class="field">
-      <label>Number of Questions</label>
-      <select id="totalQ">
-        <option value="4">4</option>
-        <option value="6" selected>6</option>
-        <option value="8">8</option>
-        <option value="10">10</option>
-      </select>
-    </div>
-    <button class="btn btn-primary btn-full" id="startBtn" onclick="startInterview()">
-      Start Interview
+
+    <button type="button" class="btn btn-primary btn-full" id="analyseBtn"
+            onclick="submitUpload()"
+            style="font-size: 1rem; padding: 0.85rem; font-weight: 700;">
+      🔍 Analyse & Start Adaptive Interview
     </button>
+
+    <p class="muted" style="text-align:center;margin-top:0.8rem;font-size:0.76rem;">
+      Your files are processed privately. Resume and JD are saved to your account history.
+    </p>
+  </form>
+</div>
+
+<!-- ═══════════════════════════════ ANALYSIS OVERLAY ════════════════════════ -->
+<div id="analysisOverlay" class="analysis-overlay" style="display:none;">
+  <div class="analysis-spinner"></div>
+  <div style="font-size:1.1rem;font-weight:700;">Analysing your documents…</div>
+  <div class="analysis-steps">
+    <div class="analysis-step active" id="step-parse"><span class="step-icon">📄</span> Parsing resume & JD</div>
+    <div class="analysis-step"        id="step-match"><span class="step-icon">🧠</span> Running NLP + TF-IDF match engine</div>
+    <div class="analysis-step"        id="step-topics"><span class="step-icon">🎯</span> Selecting 5 evidence-grounded topics</div>
+    <div class="analysis-step"        id="step-question"><span class="step-icon">💬</span> Generating personalised Question 1</div>
   </div>
 </div>
 
-<!-- Interview Screen -->
-<div id="interviewScreen" class="hidden" style="max-width:580px;margin:0 auto;">
+<!-- ═══════════════════════════════ MATCH PREVIEW ═══════════════════════════ -->
+<div id="matchPreviewSection" class="hidden" style="max-width:680px;margin:0 auto;">
+
+  <div id="matchBanner" class="match-banner"></div>
+
+  <details class="topics-preview" id="topicsPreview">
+    <summary>📋 5 Personalised Interview Topics <span style="color:var(--muted);font-weight:400;font-size:0.78rem;">(click to preview)</span></summary>
+    <div id="topicsList"></div>
+  </details>
+
+  <button class="btn btn-primary btn-full" id="beginBtn" onclick="beginInterview()"
+          style="font-size:1rem;padding:0.85rem;font-weight:700;margin-bottom:1rem;">
+    🎤 Begin Adaptive Interview Now
+  </button>
+</div>
+
+<!-- ═══════════════════════════════ INTERVIEW SCREEN ════════════════════════ -->
+<div id="interviewScreen" class="hidden" style="max-width:620px;margin:0 auto;">
+
+  <!-- Topic Evidence Banner -->
+  <div id="topicEvidenceBanner" class="topic-evidence-banner hidden">
+    <div class="topic-evidence-header">
+      <span class="topic-evidence-title" id="topicNameBadge">Topic</span>
+      <span class="pill pill-neu" id="topicTypeBadge" style="font-size:0.64rem;">Core Claim</span>
+    </div>
+    <div class="topic-evidence-why" id="topicEvidenceReason"></div>
+  </div>
+
+  <!-- Adaptive Followup Alert -->
+  <div id="followupAlert" class="followup-alert hidden">
+    <span>⚡</span>
+    <span><strong>Adaptive Follow-up Probe:</strong> Let's explore this in more depth — be specific.</span>
+  </div>
 
   <div class="row" style="margin-bottom:.85rem;justify-content:space-between;">
-    <span class="muted" id="progTxt" style="font-size:.8rem;">1 / 6</span>
+    <span class="muted" id="progTxt" style="font-size:.8rem;">1 / 5</span>
     <span class="pill pill-medium" id="diffPill">Medium</span>
   </div>
   <div style="height:2px;background:var(--border);border-radius:99px;margin-bottom:.85rem;overflow:hidden;">
@@ -74,9 +425,9 @@
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;">
       <div style="flex:1;">
         <span class="lbl">Question</span>
-        <div id="questionText" style="font-size:.97rem;line-height:1.65;">Loading…</div>
+        <div id="questionText" style="font-size:1rem;line-height:1.6;font-weight:500;">Loading…</div>
       </div>
-      <button class="btn btn-sm" id="replayBtn" onclick="replayAudio()" title="Replay question audio">↺</button>
+      <button class="btn btn-sm" onclick="replayAudio()" title="Replay">↺</button>
     </div>
     <p class="muted" id="statusLine" style="font-size:.76rem;margin-top:.45rem;min-height:1rem;"></p>
   </div>
@@ -84,7 +435,6 @@
   <div class="card">
     <span class="lbl">Your Answer</span>
     <div style="text-align:center;padding:.8rem 0 .4rem;">
-      <!-- Waveform canvas -->
       <canvas id="waveCanvas" width="300" height="48"
         style="display:none;border-radius:8px;background:var(--bg);margin-bottom:.5rem;width:100%;max-width:300px;"></canvas>
       <button class="mic-ring" id="micBtn" onclick="handleMic()">🎙</button>
@@ -96,23 +446,27 @@
       <button class="btn" onclick="submitTyped()">Send</button>
     </div>
     <div id="loader" style="display:none;font-size:.78rem;color:var(--muted);margin-top:.7rem;">
-      <span class="dots"><span></span><span></span><span></span></span> Analysing…
+      <span class="dots"><span></span><span></span><span></span></span> Evaluating against 4-dimension rubric…
     </div>
     <div id="analysisSection" class="hidden">
       <hr class="divider"/>
       <p id="transcriptBox" style="font-size:.81rem;color:var(--muted);font-style:italic;line-height:1.55;"></p>
       <div id="chips" style="display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.6rem;"></div>
+      <div id="rubricFeedbackBox" class="rubric-live-grid" style="display:none;">
+        <div class="rubric-live-cell">Technical Accuracy <strong id="liveTechAcc">—</strong></div>
+        <div class="rubric-live-cell">Problem Solving    <strong id="liveProbSolv">—</strong></div>
+        <div class="rubric-live-cell">Clarity            <strong id="liveClarity">—</strong></div>
+        <div class="rubric-live-cell">Grounding          <strong id="liveGrounding">—</strong></div>
+      </div>
+      <p id="liveFeedbackText" style="font-size:0.78rem;color:var(--green);margin-top:0.4rem;line-height:1.4;"></p>
     </div>
   </div>
 </div>
 
-<!-- Feedback Screen — full-width grid layout -->
+<!-- ═══════════════════════════════ FEEDBACK SCREEN ════════════════════════ -->
 <div id="feedbackScreen" class="hidden fb-root">
 
-  <!-- Row 1: Score circle + Summary | Score Breakdown -->
   <div class="fb-row-top">
-
-    <!-- LEFT: Score + summary text + actions -->
     <div class="card fb-card-summary">
       <span class="lbl">Interview Complete</span>
       <div style="display:flex;gap:1.2rem;align-items:center;margin:.6rem 0;">
@@ -120,174 +474,51 @@
           <span id="finalScore" style="font-size:1.5rem;font-weight:700;line-height:1;">—</span>
           <span class="muted" style="font-size:.6rem;margin-top:.15rem;">/ 10</span>
         </div>
-        <p id="feedbackText" style="font-size:.84rem;line-height:1.55;flex:1;margin:0;"></p>
+        <div>
+          <div id="finalReadinessBadge" style="font-size:0.75rem;font-weight:700;color:var(--green);margin-bottom:0.2rem;"></div>
+          <p id="feedbackText" style="font-size:.84rem;line-height:1.55;margin:0;"></p>
+        </div>
       </div>
-      <div class="row" style="margin-top:.8rem;">
+      <div class="row" style="margin-top:1rem;gap:0.6rem;">
+        <a id="viewFullReportBtn" href="#" class="btn btn-primary btn-sm" style="font-weight:600;">📊 View Full Practice Report</a>
         <button class="btn btn-sm" onclick="replayAudio()">↺ Replay</button>
-        <a href="{{ url_for('user_dashboard') }}" class="btn btn-sm btn-primary">View Dashboard</a>
+        <a href="{{ url_for('user_dashboard') }}" class="btn btn-sm">Dashboard</a>
       </div>
     </div>
 
-    <!-- RIGHT: Question-wise breakdown -->
     <div class="card fb-card-breakdown">
-      <span class="lbl">📊 Question-Wise Score Breakdown</span>
+      <span class="lbl">📊 Topic-Wise Scores</span>
       <div id="scoreBreakdownList" style="display:flex;flex-direction:column;gap:.55rem;margin-top:.8rem;"></div>
     </div>
-
   </div>
 
-  <!-- Row 2: Strengths | Weak Areas | Improvements — 3 equal columns -->
   <div id="feedbackContainer" class="fb-row-bottom" style="display:none;">
-
-    <div class="card fb-col" style="border-top: 3px solid var(--green);">
+    <div class="card fb-col" style="border-top:3px solid var(--green);">
       <span class="lbl" style="color:var(--green);">💪 Strengths</span>
       <div id="strongPointsList" style="display:flex;flex-direction:column;gap:.45rem;margin-top:.7rem;"></div>
     </div>
-
-    <div class="card fb-col" style="border-top: 3px solid var(--red);">
+    <div class="card fb-col" style="border-top:3px solid var(--red);">
       <span class="lbl" style="color:var(--red);">⚠️ Weak Areas</span>
       <div id="weakPointsList" style="display:flex;flex-direction:column;gap:.45rem;margin-top:.7rem;"></div>
     </div>
-
-    <div class="card fb-col" style="border-top: 3px solid var(--amber);">
-      <span class="lbl" style="color:var(--amber);">🚀 Improvements</span>
+    <div class="card fb-col" style="border-top:3px solid #0969da;">
+      <span class="lbl" style="color:#0969da;">🚀 7-Day Action Plan</span>
       <div id="improvementsList" style="display:flex;flex-direction:column;gap:.45rem;margin-top:.7rem;"></div>
     </div>
-
-  </div>
-
-  <!-- Row 3: Plagiarism Analysis — full width -->
-  <div id="plagiarismSection" class="card" style="display:none; margin-top:0; border-top: 3px solid #6f42c1;">
-    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:.8rem;">
-      <span class="lbl" style="color:#6f42c1; margin:0;">🔍 Plagiarism Analysis</span>
-      <div style="display:flex; align-items:center; gap:.5rem;">
-        <span style="font-size:.78rem; color:var(--muted);">Overall Risk:</span>
-        <span id="overallPlagiarismBadge" class="plag-badge"></span>
-      </div>
-    </div>
-    <div id="plagiarismList" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:.6rem; margin-top:1rem;"></div>
   </div>
 
 </div>
 
 <audio id="botAudio"></audio>
 
-<style>
-  .mic-ring {
-    width:62px;height:62px;border-radius:50%;
-    border:1px solid var(--border);background:var(--white);
-    font-size:1.45rem;cursor:pointer;
-    display:inline-flex;align-items:center;justify-content:center;
-    transition:border-color .2s,box-shadow .2s;
-  }
-  .mic-ring:hover:not(:disabled) { border-color:#aaa; }
-  .mic-ring:disabled { opacity:.4;cursor:not-allowed; }
-  .mic-ring.listening {
-    border-color:var(--red);
-    box-shadow:0 0 0 5px rgba(207,34,46,.1);
-    animation:pulse 1.3s ease-in-out infinite;
-  }
-  @keyframes pulse {
-    0%,100%{box-shadow:0 0 0 5px rgba(207,34,46,.1)}
-    50%{box-shadow:0 0 0 12px rgba(207,34,46,.02)}
-  }
-  .chip {
-    font-size:.68rem;font-weight:500;padding:.18rem .55rem;
-    border-radius:99px;border:1px solid var(--border);
-    background:var(--bg);color:var(--muted);
-  }
-  .chip.pos{color:var(--green);border-color:var(--green);background:#f0fff4;}
-  .chip.neg{color:var(--red);border-color:var(--red);background:#fff5f5;}
-  .chip.neu{color:var(--amber);border-color:var(--amber);background:#fffbea;}
-  .dots{display:inline-flex;gap:3px;vertical-align:middle;margin-right:4px;}
-  .dots span{width:5px;height:5px;border-radius:50%;background:var(--muted);animation:db .9s ease-in-out infinite;}
-  .dots span:nth-child(2){animation-delay:.15s;}
-  .dots span:nth-child(3){animation-delay:.3s;}
-  @keyframes db{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
-  .feedback-item {
-    background: var(--bg);
-    border-radius: 6px;
-    padding: .6rem .8rem;
-    font-size: .84rem;
-    display: flex;
-    align-items: flex-start;
-    gap: .6rem;
-    line-height: 1.4;
-  }
-  .feedback-item .icon { font-weight: bold; flex-shrink: 0; }
-  .feedback-item.pos .icon { color: var(--green); }
-  .feedback-item.neg .icon { color: var(--red); }
-  .feedback-item.neu .icon { color: var(--amber); }
-
-  .qb-row { display: flex; align-items: center; gap: .8rem; font-size: .82rem; }
-  .qb-label { color: var(--muted); width: 22px; text-align: right; flex-shrink:0; }
-  .qb-bar-bg { flex: 1; height: 8px; background: var(--bg); border-radius: 99px; overflow: hidden; }
-  .qb-bar-fill { height: 100%; border-radius: 99px; transition: width .6s ease-out; }
-  .qb-score { width: 34px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; font-size: .78rem; flex-shrink:0; }
-
-  /* ── Feedback full-width layout ─────────────────────────────────────────── */
-  /* Override base.html .page max-width for this screen only */
-  #feedbackScreen.fb-root { width: 100%; }
-
-  .fb-row-top {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: .85rem;
-    margin-bottom: .85rem;
-  }
-  .fb-card-summary { margin-bottom: 0; }
-  .fb-card-breakdown { margin-bottom: 0; }
-
-  .fb-row-bottom {
-    display: grid !important;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: .85rem;
-  }
-  .fb-col { margin-bottom: 0; }
-
-  .fb-score-ring {
-    width: 70px; height: 70px; border-radius: 50%;
-    border: 2px solid var(--text);
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    flex-shrink: 0;
-  }
-
-  @media (max-width: 720px) {
-    .fb-row-top    { grid-template-columns: 1fr; }
-    .fb-row-bottom { grid-template-columns: 1fr; }
-  }
-  @media (min-width: 721px) and (max-width: 960px) {
-    .fb-row-bottom { grid-template-columns: 1fr 1fr; }
-  }
-
-  /* ── Plagiarism badges ───────────────────────────────────────────────────── */
-  .plag-badge {
-    display: inline-block;
-    font-size: .67rem; font-weight: 700; letter-spacing: .06em;
-    text-transform: uppercase; padding: .2rem .6rem;
-    border-radius: 99px; border: 1px solid;
-  }
-  .plag-low    { color: var(--green); border-color: var(--green); background: #f0fff4; }
-  .plag-medium { color: var(--amber); border-color: var(--amber); background: #fffbea; }
-  .plag-high   { color: var(--red);   border-color: var(--red);   background: #fff5f5; }
-
-  .plag-row {
-    background: var(--bg); border-radius: 7px;
-    padding: .55rem .75rem;
-    display: flex; align-items: center; justify-content: space-between;
-    gap: .5rem; font-size: .82rem;
-  }
-  .plag-row .q-label { color: var(--muted); font-weight: 500; flex-shrink:0; }
-</style>
-
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let sessionId     = null;
-let currentAudio  = null;
-let busy          = false;
+let sessionId    = null;
+let currentAudio = null;
+let busy         = false;
+let pendingData  = null;   // holds /api/start-from-upload response until user clicks Begin
 
-// MediaRecorder state
+// MediaRecorder
 let mediaRecorder = null;
 let audioChunks   = [];
 let stream        = null;
@@ -298,28 +529,222 @@ let recSeconds    = 0;
 
 const $ = id => document.getElementById(id);
 
-// ── Audio Playback (edge-tts MP3 from server) ─────────────────────────────────
+// ── JD Tab Switching ──────────────────────────────────────────────────────────
+function switchJdTab(tab) {
+  if (tab === 'paste') {
+    $("jdPastePanel").style.display = "block";
+    $("jdFilePanel").style.display  = "none";
+    $("tabPaste").style.background  = "var(--text)";
+    $("tabPaste").style.color       = "#fff";
+    $("tabFile").style.background   = "";
+    $("tabFile").style.color        = "";
+  } else {
+    $("jdPastePanel").style.display = "none";
+    $("jdFilePanel").style.display  = "block";
+    $("tabFile").style.background   = "var(--text)";
+    $("tabFile").style.color        = "#fff";
+    $("tabPaste").style.background  = "";
+    $("tabPaste").style.color       = "";
+  }
+}
+
+// ── File Handlers ─────────────────────────────────────────────────────────────
+function handleResumeFile(input) {
+  if (!input.files[0]) return;
+  $("resumeFileName").textContent = input.files[0].name;
+  $("resumeChosen").style.display = "block";
+  $("resumeDropZone").classList.add("has-file");
+  $("resumeDropZone").querySelector(".drop-icon").textContent = "✅";
+}
+
+function handleJdFile(input) {
+  if (!input.files[0]) return;
+  $("jdFileName").textContent = input.files[0].name;
+  $("jdChosen").style.display = "block";
+  $("jdDropZone").classList.add("has-file");
+  $("jdDropZone").querySelector(".drop-icon").textContent = "✅";
+}
+
+// Drag-and-drop visual feedback
+["resumeDropZone", "jdDropZone"].forEach(id => {
+  const el = $(id);
+  if (!el) return;
+  el.addEventListener("dragover", e => { e.preventDefault(); el.classList.add("drag-over"); });
+  el.addEventListener("dragleave", () => el.classList.remove("drag-over"));
+  el.addEventListener("drop", e => { e.preventDefault(); el.classList.remove("drag-over"); });
+});
+
+// ── Analysis Step Animator ────────────────────────────────────────────────────
+const STEPS = ["step-parse", "step-match", "step-topics", "step-question"];
+let stepTimer = null;
+function startStepAnimation() {
+  let i = 0;
+  $(STEPS[0]).classList.add("active");
+  stepTimer = setInterval(() => {
+    if (i < STEPS.length - 1) {
+      $(STEPS[i]).classList.remove("active");
+      $(STEPS[i]).classList.add("done");
+      i++;
+      $(STEPS[i]).classList.add("active");
+    }
+  }, 5000);
+}
+function stopStepAnimation() {
+  clearInterval(stepTimer);
+  STEPS.forEach(s => { $(s).classList.remove("active"); $(s).classList.add("done"); });
+}
+
+// ── Submit Upload Form ────────────────────────────────────────────────────────
+async function submitUpload() {
+  const resumeInput = $("resumeFile");
+  const jdTextVal   = ($("jdText").value || "").trim();
+  const jdFileInput = $("jdFile");
+
+  if (!resumeInput.files[0]) {
+    alert("Please upload your resume (PDF or DOCX).");
+    return;
+  }
+  const jdFileProvided = jdFileInput && jdFileInput.files[0];
+  if (!jdTextVal && !jdFileProvided) {
+    alert("Please paste your job description or upload a JD file.");
+    return;
+  }
+
+  // Show overlay
+  $("analyseBtn").disabled = true;
+  $("analysisOverlay").style.display = "flex";
+  startStepAnimation();
+
+  const formData = new FormData();
+  formData.append("resume_file", resumeInput.files[0]);
+  formData.append("experience",  $("experience").value);
+  if (jdTextVal) {
+    formData.append("jd_text", jdTextVal);
+  } else {
+    formData.append("jd_file", jdFileInput.files[0]);
+  }
+
+  try {
+    const res  = await fetch("/api/start-from-upload", { method: "POST", body: formData });
+    const data = await res.json();
+
+    stopStepAnimation();
+    $("analysisOverlay").style.display = "none";
+
+    if (data.error) {
+      alert("Error: " + data.error);
+      $("analyseBtn").disabled = false;
+      return;
+    }
+
+    pendingData = data;
+    showMatchPreview(data);
+
+  } catch(e) {
+    stopStepAnimation();
+    $("analysisOverlay").style.display = "none";
+    alert("Network error — is the server running?");
+    $("analyseBtn").disabled = false;
+  }
+}
+
+// ── Match Preview ─────────────────────────────────────────────────────────────
+function showMatchPreview(data) {
+  $("uploadScreen").classList.add("hidden");
+  $("matchPreviewSection").classList.remove("hidden");
+
+  // Match banner
+  const matched = (data.matched_skills || []).slice(0, 6);
+  const missing = (data.missing_skills || []).slice(0, 4);
+  $("matchBanner").innerHTML = `
+    <div class="match-banner-title">Resume × JD Analysis Complete</div>
+    <div class="match-banner-role">Target Role: ${data.job_role}</div>
+    <div class="match-stats">
+      <div class="match-stat"><strong>${data.match_score}%</strong>Overall Match Score</div>
+      <div class="match-stat"><strong>${data.tfidf_score}%</strong>NLP TF-IDF Similarity</div>
+      <div class="match-stat"><strong>${(data.topics_evidence || []).length}</strong>Adaptive Topics</div>
+    </div>
+    ${matched.length ? `
+    <div style="margin-top:0.5rem;">
+      <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.3rem;font-weight:600;">MATCHED SKILLS</div>
+      <div class="skill-pills">${matched.map(s => `<span class="skill-match">✓ ${s}</span>`).join("")}</div>
+    </div>` : ""}
+    ${missing.length ? `
+    <div style="margin-top:0.5rem;">
+      <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.3rem;font-weight:600;">SKILL GAPS</div>
+      <div class="skill-pills">${missing.map(s => `<span class="skill-miss">✗ ${s}</span>`).join("")}</div>
+    </div>` : ""}
+  `;
+
+  // Topics list
+  const topics = data.topics_evidence || [];
+  $("topicsList").innerHTML = topics.map(t => `
+    <div class="topic-row">
+      <span class="topic-num">${t.topic_number}</span>
+      <div>
+        <div class="topic-name">${t.topic_name}</div>
+        <div class="topic-evidence"><strong>Why chosen:</strong> ${t.evidence_reason}</div>
+      </div>
+    </div>
+  `).join("");
+}
+
+// ── Begin Interview (after preview) ──────────────────────────────────────────
+async function beginInterview() {
+  if (!pendingData) return;
+
+  // If session_id is not yet created (e.g. loaded from match_id link)
+  if (!pendingData.session_id) {
+    const btn = $("beginBtn");
+    btn.disabled = true;
+    btn.textContent = "⏳ Initialising Interview Session…";
+    try {
+      const res = await fetch("/api/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ match_id: pendingData.match_id })
+      });
+      const data = await res.json();
+      if (data.error) {
+        alert(data.error);
+        btn.disabled = false;
+        btn.textContent = "🎤 Begin Adaptive Interview Now";
+        return;
+      }
+      pendingData = { ...pendingData, ...data };
+    } catch(e) {
+      alert("Failed to start session. Please try again.");
+      btn.disabled = false;
+      btn.textContent = "🎤 Begin Adaptive Interview Now";
+      return;
+    }
+  }
+
+  const data = pendingData;
+  sessionId = data.session_id;
+  $("matchPreviewSection").classList.add("hidden");
+  $("interviewScreen").classList.remove("hidden");
+  $("questionText").textContent = data.question;
+  updateTopicBanner(data.topic_name, data.topic_type, data.evidence_reason, false);
+  setProgress(data.question_num || 1, data.total_q || 5, data.difficulty || "medium");
+  playAudio(data.audio_url);
+}
+
+// ── Audio ─────────────────────────────────────────────────────────────────────
 function playAudio(url) {
   currentAudio = url;
   const a = $("botAudio");
   a.src = url;
   setStatus("Speaking…");
-  a.onended  = () => setStatus("Ready — click the mic or type below.");
-  a.onerror  = () => setStatus("Audio unavailable — read the question above.");
-  a.play().catch(() => setStatus("Ready — click the mic or type below."));
+  a.onended = () => setStatus("Ready — click the mic or type below.");
+  a.onerror = () => setStatus("Read the question above.");
+  a.play().catch(() => setStatus("Ready."));
 }
-
 function replayAudio() { if (currentAudio) playAudio(currentAudio); }
+function stopAudio()   { const a = $("botAudio"); a.pause(); a.currentTime = 0; }
+function setStatus(m)  { $("statusLine").textContent = m; }
 
-function stopAudio() {
-  const a = $("botAudio");
-  a.pause();
-  a.currentTime = 0;
-}
-
-function setStatus(msg) { $("statusLine").textContent = msg; }
-
-// ── Progress Bar ───────────────────────────────────────────────────────────────
+// ── Progress ──────────────────────────────────────────────────────────────────
 function setProgress(num, total, diff) {
   $("progTxt").textContent = `${num} / ${total}`;
   $("barFill").style.width = `${(num / total) * 100}%`;
@@ -328,68 +753,39 @@ function setProgress(num, total, diff) {
   p.textContent = diff[0].toUpperCase() + diff.slice(1);
 }
 
-// ── Start Interview ────────────────────────────────────────────────────────────
-async function startInterview() {
-  const role = $("jobRole").value.trim();
-  if (!role) { alert("Please enter a job role."); return; }
-  $("startBtn").disabled = true;
-  $("startBtn").textContent = "Starting…";
-  try {
-    const res  = await fetch("/api/start", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({
-        job_role:   role,
-        experience: $("experience").value,
-        test_type:  $("testType").value,
-        total_q:    $("totalQ").value,
-      }),
-    });
-    const data = await res.json();
-    if (data.error) {
-      alert(data.error);
-      $("startBtn").disabled = false;
-      $("startBtn").textContent = "Start Interview";
-      return;
-    }
-    sessionId = data.session_id;
-    $("setupScreen").classList.add("hidden");
-    $("interviewScreen").classList.remove("hidden");
-    $("questionText").textContent = data.question;
-    setProgress(1, data.total_q, data.difficulty || "medium");
-
-    // Play the welcome + first question (edge-tts neural voice)
-    playAudio(data.audio_url);
-  } catch(e) {
-    alert("Cannot connect. Is app.py running?");
-    $("startBtn").disabled = false;
-    $("startBtn").textContent = "Start Interview";
+function updateTopicBanner(name, type, evidence, isFollowup) {
+  if (name) {
+    $("topicEvidenceBanner").classList.remove("hidden");
+    $("topicNameBadge").textContent = `Topic: ${name}`;
+    $("topicTypeBadge").textContent = (type || "Core").replace(/_/g, " ").toUpperCase();
+    $("topicEvidenceReason").innerHTML = `<strong>Why selected:</strong> ${evidence || "Grounded in your resume and JD."}`;
   }
+  if (isFollowup) $("followupAlert").classList.remove("hidden");
+  else            $("followupAlert").classList.add("hidden");
 }
 
-// ── Waveform Visualiser ────────────────────────────────────────────────────────
+// ── Waveform ──────────────────────────────────────────────────────────────────
 function startWaveform(inputStream) {
   const canvas = $("waveCanvas");
   canvas.style.display = "block";
-  const ctx    = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d");
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const src      = audioCtx.createMediaStreamSource(inputStream);
-  analyser        = audioCtx.createAnalyser();
+  const src = audioCtx.createMediaStreamSource(inputStream);
+  analyser = audioCtx.createAnalyser();
   analyser.fftSize = 256;
   src.connect(analyser);
   const buf = new Uint8Array(analyser.frequencyBinCount);
-
   function draw() {
     animFrameId = requestAnimationFrame(draw);
     analyser.getByteTimeDomainData(buf);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.lineWidth   = 2;
+    ctx.lineWidth = 2;
     ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--red").trim();
     ctx.beginPath();
     const slice = canvas.width / buf.length;
     let x = 0;
     for (let i = 0; i < buf.length; i++) {
-      const v = buf[i] / 128;
-      const y = (v * canvas.height) / 2;
+      const v = buf[i] / 128, y = (v * canvas.height) / 2;
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       x += slice;
     }
@@ -398,212 +794,131 @@ function startWaveform(inputStream) {
   }
   draw();
 }
-
 function stopWaveform() {
   if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
   $("waveCanvas").style.display = "none";
 }
 
-// ── Recording Timer ────────────────────────────────────────────────────────────
+// ── Timer ─────────────────────────────────────────────────────────────────────
 function startTimer() {
   recSeconds = 0;
   $("recTimer").style.display = "block";
-  $("recTimer").textContent   = "0:00";
+  $("recTimer").textContent = "0:00";
   timerInterval = setInterval(() => {
     recSeconds++;
-    const m = Math.floor(recSeconds / 60);
-    const s = recSeconds % 60;
-    $("recTimer").textContent = `${m}:${s.toString().padStart(2, "0")}`;
-    // Auto-stop after 2 minutes
+    $("recTimer").textContent = `${Math.floor(recSeconds/60)}:${(recSeconds%60).toString().padStart(2,"0")}`;
     if (recSeconds >= 120) stopRecording();
   }, 1000);
 }
+function stopTimer() { clearInterval(timerInterval); $("recTimer").style.display = "none"; }
 
-function stopTimer() {
-  clearInterval(timerInterval);
-  $("recTimer").style.display = "none";
-}
-
-// ── Mic Handling (Browser MediaRecorder) ──────────────────────────────────────
+// ── Mic ───────────────────────────────────────────────────────────────────────
 async function handleMic() {
-  // ⚠️ Check recording FIRST — stop must work even when busy=true
-  if (mediaRecorder && mediaRecorder.state === "recording") {
-    stopRecording();
-    return;
-  }
-
-  // Stop any ongoing TTS audio so it doesn't interfere with mic
+  if (mediaRecorder && mediaRecorder.state === "recording") { stopRecording(); return; }
   stopAudio();
-
-  // Only block new recordings while processing a previous answer
   if (busy) return;
-
-  // First click → start recording
   busy = true;
   $("micBtn").disabled = true;
-  $("micHint").textContent = "Requesting mic permission…";
-
+  $("micHint").textContent = "Requesting mic…";
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   } catch(e) {
-    $("micHint").textContent = "Mic permission denied. Please allow microphone access.";
-    busy = false;
-    $("micBtn").disabled = false;
-    return;
+    $("micHint").textContent = "Mic permission denied.";
+    busy = false; $("micBtn").disabled = false; return;
   }
-
   audioChunks = [];
   mediaRecorder = new MediaRecorder(stream);
-
-  mediaRecorder.ondataavailable = e => {
-    if (e.data && e.data.size > 0) audioChunks.push(e.data);
-  };
-
+  mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) audioChunks.push(e.data); };
   mediaRecorder.onstop = async () => {
-    stopWaveform();
-    stopTimer();
-    stopMicStream();
-
+    stopWaveform(); stopTimer(); stopMicStream();
     const blob = new Blob(audioChunks, { type: "audio/webm" });
-    $("micBtn").classList.remove("listening");
-    $("micBtn").textContent = "🎙";
-    $("micBtn").disabled    = true;
+    $("micBtn").classList.remove("listening"); $("micBtn").textContent = "🎙";
+    $("micBtn").disabled = true;
     $("micHint").textContent = "Transcribing…";
     setStatus("Transcribing…");
     $("botAudio").pause();
-
     await uploadAndTranscribe(blob);
   };
-
-  mediaRecorder.start(100);   // collect chunks every 100ms
-  startWaveform(stream);
-  startTimer();
-
-  $("micBtn").disabled  = false;
-  $("micBtn").classList.add("listening");
-  $("micBtn").textContent = "⏹";
+  mediaRecorder.start(100);
+  startWaveform(stream); startTimer();
+  $("micBtn").disabled = false;
+  $("micBtn").classList.add("listening"); $("micBtn").textContent = "⏹";
   $("micHint").textContent = "Recording… click ⏹ to stop";
   setStatus("Recording…");
 }
+function stopRecording() { if (mediaRecorder && mediaRecorder.state === "recording") mediaRecorder.stop(); }
+function stopMicStream() { if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; } }
 
-function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state === "recording") {
-    mediaRecorder.stop();
-  }
-}
-
-function stopMicStream() {
-  if (stream) {
-    stream.getTracks().forEach(t => t.stop());
-    stream = null;
-  }
-}
-
-// ── Upload Audio Blob → /api/transcribe ───────────────────────────────────────
 async function uploadAndTranscribe(blob) {
-  const formData = new FormData();
-  formData.append("session_id", sessionId);
-  formData.append("audio", blob, "answer.webm");
-
+  const fd = new FormData();
+  fd.append("session_id", sessionId);
+  fd.append("audio", blob, "answer.webm");
   try {
-    const res  = await fetch("/api/transcribe", { method: "POST", body: formData });
+    const res = await fetch("/api/transcribe", { method: "POST", body: fd });
     const data = await res.json();
     $("micBtn").disabled = false;
-
-    if (data.error) {
-      $("micHint").textContent = data.error;
-      setStatus("");
-      busy = false;
-      return;
-    }
-
-    $("micHint").textContent = "Processing…";
+    if (data.error) { $("micHint").textContent = data.error; setStatus(""); busy = false; return; }
+    $("micHint").textContent = "Evaluating…";
     await submitAnswer(data.transcription);
   } catch(e) {
-    $("micBtn").disabled = false;
-    $("micHint").textContent = "Upload error — try again or type below.";
-    setStatus("");
-    busy = false;
+    $("micBtn").disabled = false; $("micHint").textContent = "Upload error."; setStatus(""); busy = false;
   }
 }
 
-// ── Text Answer ────────────────────────────────────────────────────────────────
+// ── Typed Answer ──────────────────────────────────────────────────────────────
 async function submitTyped() {
   const text = $("textIn").value.trim();
   if (!text || busy) return;
-  $("textIn").value = "";
-  busy = true;
+  $("textIn").value = ""; busy = true;
   await submitAnswer(text);
 }
 $("textIn").addEventListener("keypress", e => { if (e.key === "Enter") submitTyped(); });
 
-// ── Submit Answer to /api/answer ──────────────────────────────────────────────
-// Sends the transcribed (or typed) answer to the backend, which:
-//  1. Evaluates it with the LLM
-//  2. Generates TTS for the next question (saved to responses/)
-//  3. Returns the audio URL so we can play it back
+// ── Submit Answer ─────────────────────────────────────────────────────────────
 async function submitAnswer(text) {
   $("loader").style.display = "block";
-  $("micBtn").disabled      = true;
-  setStatus("Analysing…");
+  $("micBtn").disabled = true;
+  setStatus("Evaluating against rubrics…");
   try {
     const res  = await fetch("/api/answer", {
-      method:"POST", headers:{"Content-Type":"application/json"},
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, text }),
     });
     const data = await res.json();
     $("loader").style.display = "none";
-
     if (data.error) { alert(data.error); resetUI(); return; }
 
     $("analysisSection").classList.remove("hidden");
     $("transcriptBox").textContent = `"${data.transcription}"`;
-    renderChips(data.analysis);
+
+    $("rubricFeedbackBox").style.display = "grid";
+    $("liveTechAcc").textContent  = `${data.technical_accuracy  || data.quality_score || 5}/10`;
+    $("liveProbSolv").textContent = `${data.problem_solving     || data.quality_score || 5}/10`;
+    $("liveClarity").textContent  = `${data.communication_clarity || data.quality_score || 5}/10`;
+    $("liveGrounding").textContent= `${data.evidence_grounding  || data.quality_score || 5}/10`;
+    $("liveFeedbackText").textContent = data.rubric_feedback || "";
 
     if (data.finished) {
+      if (data.interview_id) $("viewFullReportBtn").href = `/report/${data.interview_id}`;
       showFeedback(data);
     } else {
+      updateTopicBanner(data.topic_name, data.topic_type, data.evidence_reason, data.is_followup);
       $("questionText").textContent = data.next_question;
-      setProgress(data.question_num, data.total_q, data.difficulty);
-      // Play the next question (edge-tts neural voice)
+      setProgress(data.question_num, data.total_q, data.difficulty || "medium");
       playAudio(data.audio_url);
       resetUI();
     }
   } catch(e) {
     $("loader").style.display = "none";
-    alert("Network error.");
-    resetUI();
+    alert("Network error."); resetUI();
   }
 }
 
 function resetUI() {
-  $("micBtn").disabled     = false;
-  $("micHint").textContent = "Click to speak";
-  setStatus("");
-  busy = false;
+  $("micBtn").disabled = false; $("micHint").textContent = "Click to speak"; setStatus(""); busy = false;
 }
 
-// ── Chips ─────────────────────────────────────────────────────────────────────
-function renderChips(a) {
-  if (!a) return;
-  const cls = {
-    positive:"pos", negative:"neg", neutral:"neu",
-    confident:"pos", nervous:"neg", confused:"neg", enthusiastic:"pos", unsure:"neu",
-    low:"pos", medium:"neu", high:"neg"
-  };
-  const items = [
-    { label: a.sentiment,                              key: a.sentiment },
-    { label: a.emotion,                                key: a.emotion },
-    { label: `score: ${a.quality_score}/10`,           key: a.quality_score>=7?"positive":a.quality_score>=5?"neutral":"negative" },
-    { label: `plagiarism: ${a.plagiarism_risk}`,       key: a.plagiarism_risk },
-  ];
-  $("chips").innerHTML = items.map(i =>
-    `<span class="chip ${cls[i.key]||''}">${i.label}</span>`
-  ).join("");
-}
-
-// ── Feedback Screen ───────────────────────────────────────────────────────────
-// The feedback audio is also generated as a TTS wav in responses/ and returned via audio_url
+// ── Feedback ──────────────────────────────────────────────────────────────────
 function showFeedback(data) {
   $("interviewScreen").classList.add("hidden");
   $("feedbackScreen").classList.remove("hidden");
@@ -612,79 +927,65 @@ function showFeedback(data) {
   const target = parseFloat(data.avg_score) || 0;
   let cur = 0;
   const el = $("finalScore");
-  const t = setInterval(() => {
-    cur = Math.min(cur + .2, target);
-    el.textContent = cur.toFixed(1);
-    if (cur >= target) clearInterval(t);
-  }, 30);
+  const t = setInterval(() => { cur = Math.min(cur + .2, target); el.textContent = cur.toFixed(1); if (cur >= target) clearInterval(t); }, 30);
+
+  const readiness = data.readiness_index || Math.round(target * 10);
+  $("finalReadinessBadge").textContent = `PLACEMENT READINESS: ${readiness}%`;
 
   if (typeof data.feedback === "object" && data.feedback !== null) {
     $("feedbackText").textContent = data.feedback.spoken_summary || "";
     $("feedbackContainer").style.display = "grid";
-    
-    const renderList = (id, items, type, icon) => {
-      $(id).innerHTML = (items || []).map(i => `
-        <div class="feedback-item ${type}">
-          <span class="icon">${icon}</span>
-          <span>${i}</span>
-        </div>
-      `).join("");
-    };
-    
-    renderList("strongPointsList", data.feedback.strong_points, "pos", "✓");
-    renderList("weakPointsList", data.feedback.weak_points, "neg", "✗");
-    renderList("improvementsList", data.feedback.improvements, "neu", "↗");
 
-    // Question-wise breakdown
-    if (data.scores && data.scores.length > 0) {
-      $("scoreBreakdownList").innerHTML = data.scores.map((score, idx) => {
-        const color = score >= 7 ? "var(--green)" : score >= 5 ? "var(--amber)" : "var(--red)";
-        return `
-          <div class="qb-row">
-            <span class="qb-label">Q${idx + 1}</span>
-            <div class="qb-bar-bg">
-              <div class="qb-bar-fill" style="width: ${score * 10}%; background: ${color};"></div>
-            </div>
-            <span class="qb-score" style="color: ${color};">${score}/10</span>
-          </div>
-        `;
+    const renderList = (id, items, cls, icon) => {
+      $(id).innerHTML = (items || []).map(i => {
+        const text = typeof i === "object" ? `${i.day ? i.day+': ' : ''}${i.focus||''} - ${i.task||''}` : i;
+        return `<div class="feedback-item ${cls}"><span class="icon">${icon}</span><span>${text}</span></div>`;
       }).join("");
-    } else {
-      $("scoreBreakdownList").innerHTML = `<span class="muted" style="font-size:.8rem;">No scores available.</span>`;
+    };
+    renderList("strongPointsList", data.feedback.strong_points, "pos", "✓");
+    renderList("weakPointsList",   data.feedback.weak_areas || data.feedback.weak_points, "neg", "✗");
+    renderList("improvementsList", data.feedback.action_plan_7_day || data.feedback.improvements, "neu", "🚀");
+
+    if (data.rubric_scores && data.rubric_scores.length > 0) {
+      $("scoreBreakdownList").innerHTML = data.rubric_scores.map((r, idx) => {
+        const sc = r.quality_score || 5;
+        const color = sc >= 7 ? "var(--green)" : sc >= 5 ? "var(--amber)" : "var(--red)";
+        return `<div class="qb-row">
+          <span class="qb-label" style="width:auto;font-size:0.7rem;">Q${idx+1}</span>
+          <div class="qb-bar-bg"><div class="qb-bar-fill" style="width:${sc*10}%;background:${color};"></div></div>
+          <span class="qb-score" style="color:${color};">${sc}/10</span>
+        </div>`;
+      }).join("");
     }
-  } else {
-    $("feedbackText").textContent = data.feedback || "";
   }
-    // Plagiarism Analysis
-    if (data.plagiarism_risks && data.plagiarism_risks.length > 0) {
-      const risks = data.plagiarism_risks;
-
-      // Determine overall risk (worst of all questions)
-      const riskRank = { low: 0, medium: 1, high: 2 };
-      const overall  = risks.reduce((worst, r) =>
-        (riskRank[r] || 0) > (riskRank[worst] || 0) ? r : worst, "low");
-
-      const badge = $("overallPlagiarismBadge");
-      badge.textContent = overall.toUpperCase();
-      badge.className   = `plag-badge plag-${overall}`;
-
-      // Per-question rows with reasons
-      const icons = { low: "✔", medium: "⚠", high: "✘" };
-      const reasons = data.plagiarism_reasons || [];
-      $("plagiarismList").innerHTML = risks.map((r, idx) => `
-        <div class="plag-row" style="flex-direction:column;align-items:stretch;">
-          <div style="display:flex;align-items:center;justify-content:space-between;">
-            <span class="q-label">Q${idx + 1}</span>
-            <span class="plag-badge plag-${r}">${icons[r] || ""} ${r.toUpperCase()}</span>
-          </div>
-          ${reasons[idx] ? `<span style="font-size:.72rem;color:var(--muted);margin-top:.3rem;line-height:1.35;">${reasons[idx]}</span>` : ""}
-        </div>
-      `).join("");
-
-      $("plagiarismSection").style.display = "block";
-    }
-  // Play the feedback (edge-tts neural voice)
   playAudio(data.audio_url);
 }
+
+// ── Auto-load match_id if linked from Matcher or Dashboard ─────────────────────
+window.addEventListener("DOMContentLoaded", async () => {
+  const params = new URLSearchParams(window.location.search);
+  const matchId = params.get("match_id");
+  if (matchId) {
+    try {
+      const res = await fetch(`/api/match/${matchId}`);
+      const d = await res.json();
+      if (d.success && d.match) {
+        const m = d.match;
+        pendingData = {
+          match_id: m.id,
+          job_role: m.jd_role || "Software Engineer",
+          match_score: m.match_score || 0,
+          tfidf_score: m.tfidf_score || 0,
+          matched_skills: m.matched_skills || [],
+          missing_skills: m.missing_skills || [],
+          topics_evidence: m.topics_evidence || []
+        };
+        showMatchPreview(pendingData);
+      }
+    } catch(e) {
+      console.warn("Could not auto-load match_id:", e);
+    }
+  }
+});
 </script>
 {% endblock %}

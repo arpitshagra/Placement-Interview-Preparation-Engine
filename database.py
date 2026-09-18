@@ -102,6 +102,25 @@ def init_db():
     );
     """)
 
+    # Column migrations for existing databases
+    for table, col_def in [
+        ("interviews", "match_id INTEGER"),
+        ("interviews", "resume_id INTEGER"),
+        ("interviews", "jd_id INTEGER"),
+        ("interviews", "feedback TEXT DEFAULT '{}'"),
+        ("interviews", "rubric_scores TEXT DEFAULT '[]'"),
+        ("interviews", "topics_evidence TEXT DEFAULT '[]'"),
+        ("interviews", "weak_areas TEXT DEFAULT '[]'"),
+        ("interviews", "action_plan TEXT DEFAULT '[]'"),
+        ("resume_jd_matches", "tfidf_score REAL DEFAULT 0"),
+        ("resume_jd_matches", "topics_evidence TEXT DEFAULT '[]'"),
+        ("resume_jd_matches", "analytics_breakdown TEXT DEFAULT '{}'")
+    ]:
+        try:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+        except Exception:
+            pass
+
     # Create a default admin account if none exists
     admin = c.execute("SELECT id FROM users WHERE email='admin@bot.com'").fetchone()
     if not admin:
@@ -189,20 +208,35 @@ def delete_user(uid: int):
 # INTERVIEW HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def save_interview(user_id, job_role, experience, test_type, avg_score, history):
-    """Save a completed interview to the database. History is stored as JSON text."""
-    import json
+def save_interview(user_id, job_role, experience, test_type, avg_score, history,
+                   match_id=None, resume_id=None, jd_id=None,
+                   feedback=None, rubric_scores=None, topics_evidence=None,
+                   weak_areas=None, action_plan=None) -> int:
+    """Save a completed interview with auditable rubrics and topic evidence. Returns new row ID."""
     conn = get_db()
-    conn.execute(
-        "INSERT INTO interviews (user_id, job_role, experience, test_type, avg_score, history) VALUES (?, ?, ?, ?, ?, ?)",
-        (user_id, job_role, experience, test_type, avg_score, json.dumps(history))
+    cur = conn.execute(
+        """INSERT INTO interviews
+           (user_id, job_role, experience, test_type, avg_score, history,
+            match_id, resume_id, jd_id, feedback, rubric_scores, topics_evidence, weak_areas, action_plan)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            user_id, job_role, experience, test_type, avg_score,
+            json.dumps(history or []),
+            match_id, resume_id, jd_id,
+            json.dumps(feedback or {}),
+            json.dumps(rubric_scores or []),
+            json.dumps(topics_evidence or []),
+            json.dumps(weak_areas or []),
+            json.dumps(action_plan or [])
+        )
     )
     conn.commit()
+    new_id = cur.lastrowid
     conn.close()
+    return new_id
 
 def get_user_interviews(user_id: int):
-    """Get all interviews for a user, newest first. Parses history JSON back to a list."""
-    import json
+    """Get all interviews for a user, newest first. Parses JSON fields."""
     conn = get_db()
     rows = conn.execute(
         "SELECT * FROM interviews WHERE user_id=? ORDER BY created_at DESC",
@@ -213,9 +247,88 @@ def get_user_interviews(user_id: int):
     result = []
     for r in rows:
         d = dict(r)
-        d["history"] = json.loads(d["history"] or "[]")    # convert JSON string → list
+        d["history"] = json.loads(d.get("history") or "[]")
+        d["feedback"] = json.loads(d.get("feedback") or "{}")
+        d["rubric_scores"] = json.loads(d.get("rubric_scores") or "[]")
+        d["topics_evidence"] = json.loads(d.get("topics_evidence") or "[]")
+        d["weak_areas"] = json.loads(d.get("weak_areas") or "[]")
+        d["action_plan"] = json.loads(d.get("action_plan") or "[]")
         result.append(d)
     return result
+
+def get_interview_report(interview_id: int, user_id: int = None):
+    """Retrieve full auditable report details for a specific interview session."""
+    conn = get_db()
+    query = "SELECT * FROM interviews WHERE id=?"
+    params = [interview_id]
+    if user_id is not None:
+        query += " AND user_id=?"
+        params.append(user_id)
+
+    row = conn.execute(query, tuple(params)).fetchone()
+    if not row:
+        conn.close()
+        return None
+
+    report = dict(row)
+    report["history"] = json.loads(report.get("history") or "[]")
+    report["feedback"] = json.loads(report.get("feedback") or "{}")
+    report["rubric_scores"] = json.loads(report.get("rubric_scores") or "[]")
+    report["topics_evidence"] = json.loads(report.get("topics_evidence") or "[]")
+    report["weak_areas"] = json.loads(report.get("weak_areas") or "[]")
+    report["action_plan"] = json.loads(report.get("action_plan") or "[]")
+
+    # If associated with a match, retrieve match details
+    if report.get("match_id"):
+        m_row = conn.execute("SELECT * FROM resume_jd_matches WHERE id=?", (report["match_id"],)).fetchone()
+        if m_row:
+            m_dict = dict(m_row)
+            m_dict["matched_skills"] = json.loads(m_dict.get("matched_skills") or "[]")
+            m_dict["missing_skills"] = json.loads(m_dict.get("missing_skills") or "[]")
+            m_dict["improvement_areas"] = json.loads(m_dict.get("improvement_areas") or "[]")
+            m_dict["analytics_breakdown"] = json.loads(m_dict.get("analytics_breakdown") or "{}")
+            report["match_data"] = m_dict
+
+    conn.close()
+    return report
+
+def get_user_performance_trends(user_id: int) -> dict:
+    """Compute score progression timeline and weak area frequencies across multiple sessions."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, job_role, avg_score, created_at, weak_areas FROM interviews WHERE user_id=? ORDER BY created_at ASC",
+        (user_id,)
+    ).fetchall()
+    conn.close()
+
+    timeline = []
+    weakness_counter = {}
+
+    for r in rows:
+        sc = r["avg_score"] or 0
+        timeline.append({
+            "interview_id": r["id"],
+            "role": r["job_role"],
+            "score": round(sc, 1),
+            "date": r["created_at"][:10] if r["created_at"] else ""
+        })
+        try:
+            w_list = json.loads(r["weak_areas"] or "[]")
+            for w in w_list:
+                w_str = str(w)
+                weakness_counter[w_str] = weakness_counter.get(w_str, 0) + 1
+        except Exception:
+            pass
+
+    top_weaknesses = sorted([{"area": k, "count": v} for k, v in weakness_counter.items()], key=lambda x: x["count"], reverse=True)[:5]
+
+    return {
+        "timeline": timeline,
+        "total_sessions": len(timeline),
+        "avg_score_overall": round(sum(t["score"] for t in timeline) / len(timeline), 1) if timeline else 0.0,
+        "latest_score": timeline[-1]["score"] if timeline else 0.0,
+        "frequent_weak_areas": top_weaknesses
+    }
 
 def get_user_stats(user_id: int):
     """Return total interview count, average score, and last interview date for a user."""
@@ -228,6 +341,7 @@ def get_user_stats(user_id: int):
     """, (user_id,)).fetchone()
     conn.close()
     return dict(row) if row else {"total": 0, "avg_score": None, "last_interview": None}
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -345,17 +459,21 @@ def get_user_jds(user_id: int):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_match(user_id: int, resume_id: int, jd_id: int, result: dict) -> int:
-    """Persist a match result. Returns the new row ID."""
+    """Persist a match result including NLP similarity and topic blueprint. Returns new row ID."""
     conn = get_db()
     cur = conn.execute(
         """INSERT INTO resume_jd_matches
-           (user_id, resume_id, jd_id, match_score, matched_skills, missing_skills, improvement_areas)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           (user_id, resume_id, jd_id, match_score, matched_skills, missing_skills,
+            improvement_areas, tfidf_score, topics_evidence, analytics_breakdown)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (user_id, resume_id, jd_id,
          result.get("match_score", 0),
          json.dumps(result.get("matched_skills",    [])),
          json.dumps(result.get("missing_skills",    [])),
-         json.dumps(result.get("improvement_areas", [])))
+         json.dumps(result.get("improvement_areas", [])),
+         result.get("tfidf_score", 0.0),
+         json.dumps(result.get("topics_evidence",   [])),
+         json.dumps(result.get("analytics_breakdown", {})))
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -363,12 +481,50 @@ def save_match(user_id: int, resume_id: int, jd_id: int, result: dict) -> int:
     return new_id
 
 
+def get_match_by_id(match_id: int, user_id: int = None):
+    """Fetch a single match record with unparsed JSON fields converted back to dicts."""
+    conn = get_db()
+    query = """
+        SELECT m.*,
+               r.filename AS resume_filename, r.skills AS resume_skills,
+               r.projects AS resume_projects, r.experience AS resume_experience,
+               j.role     AS jd_role, j.required_skills AS jd_required,
+               j.preferred_skills AS jd_preferred, j.experience_required AS jd_experience
+        FROM resume_jd_matches m
+        JOIN resumes r          ON r.id = m.resume_id
+        JOIN job_descriptions j ON j.id = m.jd_id
+        WHERE m.id = ?
+    """
+    params = [match_id]
+    if user_id is not None:
+        query += " AND m.user_id = ?"
+        params.append(user_id)
+
+    row = conn.execute(query, tuple(params)).fetchone()
+    conn.close()
+    if not row:
+        return None
+
+    d = dict(row)
+    for field in ("matched_skills", "missing_skills", "improvement_areas", "topics_evidence",
+                  "resume_skills", "resume_projects", "resume_experience", "jd_required", "jd_preferred"):
+        try:
+            d[field] = json.loads(d.get(field) or "[]")
+        except Exception:
+            d[field] = []
+    try:
+        d["analytics_breakdown"] = json.loads(d.get("analytics_breakdown") or "{}")
+    except Exception:
+        d["analytics_breakdown"] = {}
+    return d
+
+
 def get_user_matches(user_id: int):
-    """Return all match results for a user with resume filename and JD role."""
+    """Return all match results for a user with resume filename, JD role, and topic counts."""
     conn = get_db()
     rows = conn.execute("""
-        SELECT m.id, m.match_score, m.matched_skills, m.missing_skills,
-               m.improvement_areas, m.created_at,
+        SELECT m.id, m.match_score, m.tfidf_score, m.matched_skills, m.missing_skills,
+               m.improvement_areas, m.topics_evidence, m.analytics_breakdown, m.created_at,
                r.filename AS resume_filename,
                j.role     AS jd_role
         FROM resume_jd_matches m
@@ -381,7 +537,15 @@ def get_user_matches(user_id: int):
     result = []
     for row in rows:
         d = dict(row)
-        for field in ("matched_skills", "missing_skills", "improvement_areas"):
-            d[field] = json.loads(d.get(field) or "[]")
+        for field in ("matched_skills", "missing_skills", "improvement_areas", "topics_evidence"):
+            try:
+                d[field] = json.loads(d.get(field) or "[]")
+            except Exception:
+                d[field] = []
+        try:
+            d["analytics_breakdown"] = json.loads(d.get("analytics_breakdown") or "{}")
+        except Exception:
+            d["analytics_breakdown"] = {}
         result.append(d)
     return result
+
