@@ -19,7 +19,15 @@ from flask import Flask, request, jsonify, render_template, send_file, session, 
 import whisper, edge_tts
 from groq import Groq
 import database as db
-from ml_engine import compute_tfidf_similarity, analyze_skills_with_pandas, select_topics_with_evidence
+try:
+    from ml_engine import compute_tfidf_similarity, analyze_skills_with_pandas, select_topics_with_evidence
+    ML_ENGINE_AVAILABLE = True
+except Exception as _ml_err:
+    print(f"[WARN] ml_engine unavailable ({_ml_err}). TF-IDF/pandas features disabled.")
+    ML_ENGINE_AVAILABLE = False
+    def compute_tfidf_similarity(*a, **kw): return {"similarity": 0.0, "error": "ml_engine unavailable"}
+    def analyze_skills_with_pandas(*a, **kw): return {}
+    def select_topics_with_evidence(*a, **kw): return []
 
 # ── App Setup ─────────────────────────────────────────────────────────────────
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
@@ -1124,7 +1132,10 @@ def audio(filename):
 
 def fallback_parse_resume(raw_text: str) -> dict:
     """Deterministic rule-based resume parser used when LLM is unavailable or offline."""
-    from ml_engine import SKILL_CATEGORIES
+    if ML_ENGINE_AVAILABLE:
+        from ml_engine import SKILL_CATEGORIES
+    else:
+        SKILL_CATEGORIES = {}
     text_lower = raw_text.lower()
 
     # Extract known technical skills using word boundaries
@@ -1174,7 +1185,10 @@ def fallback_parse_resume(raw_text: str) -> dict:
 
 def fallback_parse_jd(jd_text: str) -> dict:
     """Deterministic rule-based JD parser used when LLM is unavailable or offline."""
-    from ml_engine import SKILL_CATEGORIES
+    if ML_ENGINE_AVAILABLE:
+        from ml_engine import SKILL_CATEGORIES
+    else:
+        SKILL_CATEGORIES = {}
     text_lower = jd_text.lower()
 
     extracted_skills = []

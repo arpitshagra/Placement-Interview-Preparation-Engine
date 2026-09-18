@@ -1,41 +1,57 @@
 {% extends "base.html" %}
-{% block title %}Admin — Interview Bot{% endblock %}
+{% block title %}Admin — IntervIQ{% endblock %}
 {% block content %}
 
-<div style="margin-bottom:1.4rem;">
-  <h2 style="font-size:1.05rem;font-weight:600;">All Users</h2>
-  <p class="muted">{{ users|length }} registered user{{ 's' if users|length != 1 }}</p>
+<!-- Header -->
+<div style="margin-bottom:2rem;">
+  <span class="lbl">Admin Panel</span>
+  <h1 style="font-family:'Playfair Display',serif;font-size:clamp(1.5rem,3vw,2rem);font-weight:700;letter-spacing:-.02em;">
+    All Users
+  </h1>
+  <p class="muted" style="margin-top:.3rem;">{{ users|length }} registered user{{ 's' if users|length != 1 }}</p>
 </div>
 
-<div class="card" style="padding:0;">
+<div class="card" style="padding:0;overflow:hidden;">
   {% if users %}
   <table class="tbl">
     <thead>
       <tr>
-        <th>Name</th><th>Email</th><th>College</th>
-        <th>Target Co.</th><th>Interviews</th><th>Avg Score</th>
-        <th>Joined</th><th></th>
+        <th>Name</th>
+        <th>Email</th>
+        <th>College</th>
+        <th>Target Co.</th>
+        <th>Interviews</th>
+        <th>Avg Score</th>
+        <th>Joined</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
       {% for u in users %}
       <tr>
-        <td style="font-weight:500;">{{ u.name }}</td>
+        <td style="font-weight:600;">{{ u.name }}</td>
         <td class="muted">{{ u.email }}</td>
         <td class="muted">{{ u.college or '—' }}</td>
         <td class="muted">{{ u.target_company or '—' }}</td>
-        <td>{{ u.interview_count }}</td>
-        <td>{{ u.avg_score or '—' }}</td>
+        <td>
+          <span style="font-family:'Playfair Display',serif;font-weight:700;font-size:1.1rem;color:var(--accent);">{{ u.interview_count }}</span>
+        </td>
+        <td>
+          {% if u.avg_score %}
+            <span style="font-weight:700;color:var(--ink);">{{ u.avg_score }}</span><span class="muted">/10</span>
+          {% else %}—{% endif %}
+        </td>
         <td class="muted">{{ u.created_at[:10] }}</td>
         <td>
-          <a href="{{ url_for('admin_user_detail', uid=u.id) }}" class="btn btn-sm">View</a>
+          <a href="{{ url_for('admin_user_detail', uid=u.id) }}" class="btn btn-sm">View →</a>
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p class="muted" style="padding:1.5rem;">No users yet.</p>
+  <p class="muted" style="padding:2rem 1.75rem;">No users registered yet.</p>
   {% endif %}
 </div>
+
 {% endblock %}

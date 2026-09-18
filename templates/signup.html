@@ -1,11 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Sign Up — IntervIQ{% endblock %}
+{% block title %}Create Account — IntervIQ{% endblock %}
 
 {% block content %}
-<div style="max-width:420px;margin:2.5rem auto;">
-  <div style="text-align:center;margin-bottom:1.8rem;">
-    <h1 style="font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;">Create Account</h1>
-    <p class="muted" style="margin-top:.25rem;font-size:0.86rem;">Set up your interview profile</p>
+<div style="max-width:480px;margin:2rem auto;">
+
+  <!-- Branding -->
+  <div style="text-align:center;margin-bottom:2rem;">
+    <div style="font-family:'Playfair Display',serif;font-size:1.6rem;font-weight:700;color:var(--ink);letter-spacing:-.02em;margin-bottom:.4rem;">
+      Interv<span style="color:var(--accent);">IQ</span>
+    </div>
+    <p style="font-size:.88rem;color:var(--ink-muted);font-weight:300;">Set up your interview profile — takes under a minute</p>
   </div>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -14,9 +18,10 @@
     {% endfor %}
   {% endwith %}
 
-  <div class="card" style="box-shadow: 0 4px 16px rgba(0,0,0,0.04);">
-    <!-- Google OAuth Button -->
-    <button type="button" class="btn btn-full btn-google" id="googleSignupBtn" onclick="signInWithGoogle(this)">
+  <div class="card" style="padding:2rem;">
+
+    <!-- Google OAuth -->
+    <button type="button" class="btn-google" id="googleSignupBtn" onclick="signInWithGoogle(this)">
       <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
         <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
         <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.34 24 12 24z"/>
@@ -26,25 +31,30 @@
       <span>Continue with Google</span>
     </button>
 
-    <div class="auth-divider">
-      <span>or register with email</span>
-    </div>
+    <div class="auth-divider"><span>or register with email</span></div>
 
     <form method="POST">
+
+      <span class="lbl">Your Details</span>
       <div class="grid2">
         <div class="field">
-          <label>Full Name *</label>
+          <label>Full Name <span style="color:var(--accent);">*</span></label>
           <input type="text" name="name" placeholder="Rahul Sharma" required/>
         </div>
         <div class="field">
-          <label>Email *</label>
+          <label>Email <span style="color:var(--accent);">*</span></label>
           <input type="email" name="email" placeholder="you@email.com" required/>
         </div>
       </div>
+
       <div class="field">
-        <label>Password *</label>
+        <label>Password <span style="color:var(--accent);">*</span></label>
         <input type="password" name="password" placeholder="Min 6 characters" required/>
       </div>
+
+      <div class="divider"></div>
+
+      <span class="lbl">Academic Profile</span>
       <div class="grid2">
         <div class="field">
           <label>Phone</label>
@@ -55,60 +65,30 @@
           <input type="text" name="college" placeholder="IIT Delhi"/>
         </div>
       </div>
-      <div class="field">
+
+      <div class="field" style="margin-bottom:1.5rem;">
         <label>Target Company</label>
-        <input type="text" name="target_company" placeholder="Google, Microsoft …"/>
+        <input type="text" name="target_company" placeholder="Google, Microsoft, Amazon…"/>
       </div>
-      <button type="submit" class="btn btn-primary btn-full" style="margin-top:.4rem;">
-        Create Account
+
+      <button type="submit" class="btn btn-primary btn-full" style="padding:.78rem;">
+        Create Account →
       </button>
     </form>
+
+    <div class="divider" style="margin:1.4rem 0;"></div>
+
+    <p style="text-align:center;font-size:.84rem;color:var(--ink-muted);">
+      Already have an account?
+      <a href="{{ url_for('login') }}" style="color:var(--accent);font-weight:600;">Sign in</a>
+    </p>
   </div>
 
-  <p class="muted" style="text-align:center;margin-top:1.1rem;font-size:.82rem;">
-    Already have an account? <a href="{{ url_for('login') }}" style="color:var(--text);font-weight:600;">Sign in</a>
+  <p style="text-align:center;margin-top:1.2rem;">
+    <a href="{{ url_for('index') }}" style="font-size:.8rem;color:var(--ink-muted);"
+       onmouseover="this.style.color='var(--ink)'" onmouseout="this.style.color='var(--ink-muted)'">
+      ← Back to home
+    </a>
   </p>
 </div>
-
-<style>
-  .btn-google {
-    background: #ffffff;
-    border: 1px solid var(--border);
-    color: #1f2937;
-    font-weight: 500;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 0.68rem 1rem;
-    border-radius: 6px;
-    transition: background-color .15s, border-color .15s, box-shadow .15s;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-    cursor: pointer;
-  }
-  .btn-google:hover:not(:disabled) {
-    background-color: #f9fafb;
-    border-color: #d1d5db;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.06);
-  }
-  .auth-divider {
-    display: flex;
-    align-items: center;
-    text-align: center;
-    margin: 1.1rem 0;
-    color: var(--muted);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-  .auth-divider::before,
-  .auth-divider::after {
-    content: '';
-    flex: 1;
-    border-bottom: 1px solid var(--border);
-  }
-  .auth-divider span {
-    padding: 0 0.65rem;
-  }
-</style>
 {% endblock %}

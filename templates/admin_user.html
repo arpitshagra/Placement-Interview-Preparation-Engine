@@ -1,100 +1,103 @@
 {% extends "base.html" %}
-{% block title %}{{ user.name }} — Admin{% endblock %}
+{% block title %}{{ user.name }} — Admin · IntervIQ{% endblock %}
 {% block content %}
 
-<!-- Header row with Back button and Delete -->
-<div class="row" style="justify-content:space-between;margin-bottom:1.4rem;flex-wrap:wrap;gap:.6rem;">
+<!-- Header -->
+<div class="row" style="justify-content:space-between;margin-bottom:2rem;flex-wrap:wrap;gap:.8rem;">
   <div class="row">
     <a href="{{ url_for('admin_dashboard') }}" class="btn btn-sm">← Back</a>
     <div>
-      <h2 style="font-size:1rem;font-weight:600;">{{ user.name }}</h2>
+      <span class="lbl" style="margin:0;">User Detail</span>
+      <h1 style="font-family:'Playfair Display',serif;font-size:1.6rem;font-weight:700;letter-spacing:-.02em;line-height:1.2;">
+        {{ user.name }}
+      </h1>
       <p class="muted">{{ user.email }}</p>
     </div>
   </div>
-  <!-- Delete user with confirmation popup -->
   <form method="POST" action="{{ url_for('delete_user', uid=user.id) }}"
         onsubmit="return confirm('Delete {{ user.name }}? This cannot be undone.')">
     <button type="submit" class="btn btn-sm btn-danger">Delete User</button>
   </form>
 </div>
 
-<!-- Stats: total interviews, avg score, last date -->
+<!-- Stats -->
 <div class="stats">
   <div class="stat-card">
-    <div class="stat-val">{{ stats.total or 0 }}</div>
+    <span class="stat-val">{{ stats.total or 0 }}</span>
     <div class="stat-key">Interviews</div>
   </div>
   <div class="stat-card">
-    <div class="stat-val">{{ stats.avg_score or '—' }}</div>
+    <span class="stat-val">{{ stats.avg_score or '—' }}</span>
     <div class="stat-key">Avg Score / 10</div>
   </div>
   <div class="stat-card">
-    <div class="stat-val">{{ stats.last_interview[:10] if stats.last_interview else '—' }}</div>
+    <span class="stat-val" style="font-size:1.3rem;">{{ stats.last_interview[:10] if stats.last_interview else '—' }}</span>
     <div class="stat-key">Last Interview</div>
   </div>
 </div>
 
-<!-- User Profile -->
+<!-- Profile -->
 <div class="card">
   <span class="lbl">Profile</span>
   <div class="grid2">
-    <div><span class="muted">Phone</span><br>{{ user.phone or '—' }}</div>
-    <div><span class="muted">College</span><br>{{ user.college or '—' }}</div>
-    <div style="margin-top:.7rem;"><span class="muted">Target Company</span><br>{{ user.target_company or '—' }}</div>
-    <div style="margin-top:.7rem;"><span class="muted">Joined</span><br>{{ user.created_at[:10] }}</div>
+    <div>
+      <p class="muted" style="margin-bottom:.12rem;">Phone</p>
+      <p style="font-size:.9rem;font-weight:500;">{{ user.phone or '—' }}</p>
+    </div>
+    <div>
+      <p class="muted" style="margin-bottom:.12rem;">College</p>
+      <p style="font-size:.9rem;font-weight:500;">{{ user.college or '—' }}</p>
+    </div>
+    <div style="margin-top:.7rem;">
+      <p class="muted" style="margin-bottom:.12rem;">Target Company</p>
+      <p style="font-size:.9rem;font-weight:500;">{{ user.target_company or '—' }}</p>
+    </div>
+    <div style="margin-top:.7rem;">
+      <p class="muted" style="margin-bottom:.12rem;">Joined</p>
+      <p style="font-size:.9rem;font-weight:500;">{{ user.created_at[:10] }}</p>
+    </div>
   </div>
 </div>
 
-<!-- Interview History — each interview expandable with full Q&A + AI analysis -->
-<div class="card" style="padding:0;">
-  <div style="padding:1.1rem 1.5rem .5rem;">
-    <span class="lbl" style="margin:0;">Interview History ({{ interviews|length }})</span>
+<!-- Interview History -->
+<div class="card" style="padding:0;overflow:hidden;">
+  <div style="padding:1.4rem 1.75rem .8rem;border-bottom:1px solid var(--border);">
+    <span class="lbl" style="margin:0;">Interview History</span>
+    <h2 style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:600;margin-top:.1rem;">
+      {{ interviews|length }} session{{ 's' if interviews|length != 1 }}
+    </h2>
   </div>
 
   {% if interviews %}
     {% for iv in interviews %}
-    <div style="border-top:1px solid var(--border);padding:0 1.5rem;">
-      <!-- Click to expand/collapse each interview -->
+    <div style="border-bottom:1px solid var(--border);padding:0 1.75rem;">
       <details>
         <summary>
           <span>
-            <strong>{{ iv.job_role }}</strong>
-            <span class="muted" style="font-weight:400;">
+            <strong style="font-weight:600;">{{ iv.job_role }}</strong>
+            <span class="muted" style="font-weight:400;margin-left:.4rem;">
               · {{ iv.test_type | capitalize }} · {{ iv.experience | capitalize }} · {{ iv.created_at[:10] }}
             </span>
           </span>
-          <span style="color:var(--text);font-weight:600;font-size:.9rem;margin-right:1.5rem;">
-            {{ iv.avg_score or '—' }}/10
+          <span style="font-family:'Playfair Display',serif;font-weight:700;font-size:.95rem;color:var(--accent);margin-right:1.5rem;">
+            {{ iv.avg_score or '—' }}<span style="font-size:.7rem;font-weight:400;color:var(--ink-muted);">/10</span>
           </span>
         </summary>
 
-        <!-- Per-question details -->
-        <div style="padding-bottom:1rem;">
+        <div style="padding-bottom:1.2rem;">
           {% for h in iv.history %}{% if h.answer %}
-          <div style="margin-top:.8rem;padding:.9rem;background:var(--bg);border-radius:6px;">
-
-            <!-- The question asked -->
-            <p style="font-size:.82rem;font-weight:500;margin-bottom:.35rem;">Q{{ loop.index }}: {{ h.question }}</p>
-
-            <!-- Candidate's spoken/typed answer -->
-            <p style="font-size:.82rem;color:var(--muted);font-style:italic;margin-bottom:.4rem;">"{{ h.answer }}"</p>
-
+          <div style="margin-top:.75rem;padding:1rem;background:var(--bg);border-radius:10px;border:1px solid var(--border);">
+            <p style="font-size:.85rem;font-weight:600;margin-bottom:.3rem;">Q{{ loop.index }}: {{ h.question }}</p>
+            <p style="font-size:.83rem;color:var(--ink-muted);font-style:italic;margin-bottom:.5rem;">"{{ h.answer }}"</p>
             {% if h.analysis %}
             <div class="row">
-              <!-- Sentiment badge: was the answer positive/neutral/negative in tone? -->
               <span class="pill pill-{{ 'pos' if h.analysis.sentiment=='positive' else 'neg' if h.analysis.sentiment=='negative' else 'neu' }}">
                 {{ h.analysis.sentiment }}
               </span>
-
-              <!-- Emotion badge: how did the candidate sound? (confident, nervous, etc.) -->
               <span class="pill pill-{{ 'pos' if h.analysis.emotion in ['confident','enthusiastic'] else 'neg' if h.analysis.emotion in ['nervous','confused'] else 'neu' }}">
-                😐 {{ h.analysis.emotion }}
+                {{ h.analysis.emotion }}
               </span>
-
-              <!-- Quality score out of 10 -->
-              <span style="font-size:.75rem;color:var(--muted);">Score: <strong>{{ h.analysis.quality_score }}/10</strong></span>
-
-              <!-- Plagiarism risk: show warning if medium or high -->
+              <span style="font-size:.77rem;color:var(--ink-muted);">Score: <strong style="color:var(--ink);">{{ h.analysis.quality_score }}/10</strong></span>
               {% if h.analysis.plagiarism_risk == 'high' %}
                 <span class="pill pill-neg">⚠ plagiarism: high</span>
               {% elif h.analysis.plagiarism_risk == 'medium' %}
@@ -102,7 +105,6 @@
               {% endif %}
             </div>
             {% endif %}
-
           </div>
           {% endif %}{% endfor %}
         </div>
@@ -110,7 +112,7 @@
     </div>
     {% endfor %}
   {% else %}
-    <p class="muted" style="padding:1rem 1.5rem;">No interviews yet.</p>
+    <p class="muted" style="padding:1.5rem 1.75rem;">No interviews recorded for this user.</p>
   {% endif %}
 </div>
 
